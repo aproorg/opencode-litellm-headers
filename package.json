@@ -1,0 +1,30 @@
+{
+  "name": "@aproorg/opencode-litellm-headers",
+  "version": "0.1.0",
+  "description": "OpenCode plugin that injects an x-github-repo header into LiteLLM requests for per-repository usage attribution.",
+  "main": "src/index.ts",
+  "type": "module",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "litellm",
+    "ai",
+    "headers"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aproorg/opencode-litellm-headers.git"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.4.0"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.4.6"
+  }
+}
