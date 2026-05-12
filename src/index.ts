@@ -28,36 +28,52 @@ export const LiteLLMGitHubRepoHeaderPlugin: Plugin = async ({
   const headerName =
     process.env.OPENCODE_LITELLM_HEADER_NAME || DEFAULT_HEADER_NAME
 
-  const cache = new Map<string, string>()
+  const repoCache = new Map<string, string | null>()
 
-  async function detectRepo(cwd: string): Promise<string> {
-    const cached = cache.get(cwd)
-    if (cached !== undefined) return cached
-
-    let value = basename(cwd) || basename(process.cwd())
+  async function gitRepoForDir(cwd: string): Promise<string | null> {
+    if (repoCache.has(cwd)) return repoCache.get(cwd) ?? null
+    let parsed: string | null = null
     try {
       const result = await $`git -C ${cwd} remote get-url origin`
         .quiet()
         .nothrow()
       if (result.exitCode === 0) {
-        const url = String(result.stdout).trim()
-        const parsed = parseOrgRepo(url)
-        if (parsed) value = parsed
+        parsed = parseOrgRepo(String(result.stdout).trim())
       }
     } catch {
-      // fall through to basename fallback
+      // ignore
+    }
+    repoCache.set(cwd, parsed)
+    return parsed
+  }
+
+  async function resolveRepoLabel(): Promise<string> {
+    const candidates = Array.from(
+      new Set(
+        [process.cwd(), worktree, directory].filter(
+          (c): c is string => typeof c === "string" && c.length > 0,
+        ),
+      ),
+    )
+
+    for (const cwd of candidates) {
+      const repo = await gitRepoForDir(cwd)
+      if (repo) return repo
     }
 
-    cache.set(cwd, value)
-    return value
+    for (const cwd of candidates) {
+      const name = basename(cwd)
+      if (name) return name
+    }
+
+    return "unknown"
   }
 
   return {
     "chat.headers": async (input, output) => {
       if (input.provider.id !== providerId) return
-      const cwd = worktree || directory || process.cwd()
-      const repo = await detectRepo(cwd)
-      if (repo) output.headers[headerName] = repo
+      const value = await resolveRepoLabel()
+      if (value) output.headers[headerName] = value
     },
   }
 }
