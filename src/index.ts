@@ -34,7 +34,7 @@ export const LiteLLMGitHubRepoHeaderPlugin: Plugin = async ({
     const cached = cache.get(cwd)
     if (cached !== undefined) return cached
 
-    let value = basename(cwd) || "unknown"
+    let value = basename(cwd) || basename(process.cwd())
     try {
       const result = await $`git -C ${cwd} remote get-url origin`
         .quiet()
