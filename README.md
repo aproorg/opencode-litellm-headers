@@ -40,6 +40,7 @@ Run `opencode`. Bun installs the plugin on first launch and caches it under `~/.
 | API key | `op read "op://Employee/ai.apro.is litellm/API Key"`, cached 12h in `~/.cache/opencode-apro/secrets.json` (mode 0600) |
 | Provider | `litellm` plus `litellm-anthropic`, `litellm-google`, `litellm-openai` → `@ai-sdk/openai-compatible` against `https://litellm.ai.apro.is/v1` |
 | Models | `GET /model_group/info`, minus anything declaring a non-chat mode, with context/output limits, per-million costs and capabilities. Cached 6h |
+| Reasoning effort | Each model's effort options come from the gateway's `supported_reasoning_efforts`, instead of OpenCode's hardcoded low/medium/high |
 | Grouping | `claude-*` under **Anthropic**, `gemini-*` under **Google**, `gpt-*` under **OpenAI**, everything else under **LiteLLM** |
 | Defaults | `model` and `small_model` set to the first available of a preferred list |
 | MCP | memory, sequentialthinking, filesystem (via `npx`, else `bunx`), fetch, time, git (via `uvx`), and github. Servers whose runner is not installed are skipped rather than registered broken |
