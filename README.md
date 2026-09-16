@@ -18,20 +18,24 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/aproorg/opencode-litellm-headers/main/install.ps1 | iex
 ```
 
-The installer installs OpenCode if it is missing, writes the config, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models. `opencode.json` is the file it manages: a `config.json` or `opencode.jsonc` in the same directory loads after it and would override it, so those are renamed to `*.bak-<timestamp>` and the path is printed. Set `OPENCODE_ASSUME_YES=1` to take every prompt as yes.
+**Run the same command again to update.** The installer owns the plugin files, so rerunning replaces them with the current version — there is no package cache to invalidate.
 
-To do it by hand instead: install OpenCode (`brew install anomalyco/tap/opencode`, `scoop install opencode`, or `npm i -g opencode-ai@latest`) and write `~/.config/opencode/opencode.json` — `%USERPROFILE%\.config\opencode\opencode.json` on Windows:
+It installs OpenCode if missing, downloads the plugin to `~/.local/share/apro-opencode/`, records the version in a `VERSION` file beside it, points `~/.config/opencode/opencode.json` at it, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OPENCODE_LITELLM_REF` | `main` | Branch, tag or commit to install — use it to pin or roll back |
+| `OPENCODE_LITELLM_HOME` | `~/.local/share/apro-opencode` | Where the plugin files live |
+| `OPENCODE_ASSUME_YES` | unset | `1` answers every prompt with yes |
+
+The config it writes is one entry:
 
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    "@aproorg/opencode-litellm-headers@git+https://github.com/aproorg/opencode-litellm-headers.git"
-  ]
+  "plugin": ["file:///Users/you/.local/share/apro-opencode/index.js"]
 }
 ```
-
-Run `opencode`. Bun installs the plugin on first launch and caches it under `~/.cache/opencode/packages/`.
 
 ## What the plugin sets up
 

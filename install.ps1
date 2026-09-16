@@ -3,11 +3,14 @@
 
 $ErrorActionPreference = "Stop"
 
-$Plugin = if ($env:OPENCODE_LITELLM_PLUGIN_SPEC) { $env:OPENCODE_LITELLM_PLUGIN_SPEC }
-          else { "@aproorg/opencode-litellm-headers@git+https://github.com/aproorg/opencode-litellm-headers.git" }
+$Repo = "aproorg/opencode-litellm-headers"
+$Ref = if ($env:OPENCODE_LITELLM_REF) { $env:OPENCODE_LITELLM_REF } else { "main" }
+$PluginHome = if ($env:OPENCODE_LITELLM_HOME) { $env:OPENCODE_LITELLM_HOME } else { Join-Path $HOME ".local\share\apro-opencode" }
 # Not OPENCODE_CONFIG_DIR: other tooling sets that, and we would write into its config.
 $ConfigDir = if ($env:OPENCODE_LITELLM_CONFIG_DIR) { $env:OPENCODE_LITELLM_CONFIG_DIR } else { Join-Path $HOME ".config\opencode" }
 $ConfigPath = Join-Path $ConfigDir "opencode.json"
+$cacheHome = if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME } else { Join-Path $HOME ".cache" }
+$stamp = Get-Date -Format yyyyMMddHHmmss
 
 function Have($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
 
@@ -27,12 +30,38 @@ if (-not (Have "opencode")) {
 }
 Write-Host "opencode $(opencode --version) at $((Get-Command opencode).Source)"
 
-# 2. config: add the plugin, retire settings the plugin now manages
+# 2. the plugin itself, as files we own - rerunning this script is the update path
+$tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("apro-opencode-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+try {
+  Write-Host "Downloading plugin ($Ref)..."
+  $tarball = Join-Path $tmp "plugin.tar.gz"
+  Invoke-WebRequest -Uri "https://codeload.github.com/$Repo/tar.gz/$Ref" -OutFile $tarball -UseBasicParsing
+  tar -xzf $tarball -C $tmp
+  if ($LASTEXITCODE -ne 0) { throw "could not extract the plugin archive" }
+
+  $src = Get-ChildItem -Path $tmp -Directory -Recurse -Depth 1 | Where-Object { $_.Name -eq "src" } | Select-Object -First 1
+  if (-not $src) { throw "downloaded archive has no src directory" }
+
+  $sha = "unknown"
+  try {
+    $commit = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/commits/$Ref" -UseBasicParsing
+    $sha = $commit.sha.Substring(0, 7)
+  } catch { }
+
+  New-Item -ItemType Directory -Force -Path (Split-Path $PluginHome -Parent) | Out-Null
+  if (Test-Path $PluginHome) { Remove-Item -Recurse -Force $PluginHome }
+  Move-Item $src.FullName $PluginHome
+  Set-Content -Path (Join-Path $PluginHome "VERSION") -Value "$Ref $sha" -Encoding UTF8
+  Write-Host "Installed plugin $Ref ($sha) to $PluginHome"
+} finally {
+  Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+}
+
+# 3. config
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
 
 # opencode.json is the file we manage; config.json and opencode.jsonc also load and would override it.
-$stamp = Get-Date -Format yyyyMMddHHmmss
-
 foreach ($other in @("opencode.jsonc", "config.json")) {
   $otherPath = Join-Path $ConfigDir $other
   if (Test-Path $otherPath) {
@@ -69,28 +98,26 @@ if ($managed) {
 }
 
 if (-not $config.Contains('$schema')) { $config['$schema'] = "https://opencode.ai/config.json" }
-$plugins = @($config["plugin"]) | Where-Object { $_ -and ($_ -notlike "*opencode-litellm-headers*") }
-$config["plugin"] = @($plugins) + @($Plugin)
+$entry = "file:///" + ($PluginHome -replace '\\', '/').TrimStart('/') + "/index.js"
+$plugins = @($config["plugin"]) | Where-Object { $_ -and ($_ -notlike "*opencode-litellm-headers*") -and ($_ -notlike "*apro-opencode*") }
+$config["plugin"] = @($plugins) + @($entry)
 
 ConvertTo-Json $config -Depth 20 | Set-Content $ConfigPath -Encoding UTF8
 Write-Host "Wrote $ConfigPath"
 
-# 3. optional runtimes for the local MCP servers
-if (-not (Have "npx") -and -not (Have "bunx")) {
-  Write-Host "Note: no npx or bunx found - the local MCP servers are skipped. Models and chat work regardless."
-}
-if (-not (Have "uvx")) {
-  Write-Host "Note: no uvx found - the fetch/time/git MCP servers are skipped. Models and chat work regardless."
-}
+# Earlier versions were installed as a package; leaving that cached would load the plugin twice.
+$pluginCache = Join-Path $cacheHome "opencode\packages\@aproorg"
+if (Test-Path $pluginCache) { Remove-Item -Recurse -Force $pluginCache }
 
-# 4. first launch: install the plugin, fetch the model list
+# 4. verify
 Write-Host ""
-Write-Host "Setting up (first run downloads the plugin and syncs models)..."
+Write-Host "Syncing models..."
 $models = @(opencode models 2>$null | Where-Object { $_ -match "^litellm(/|-)" })
 
 Write-Host ""
 if ($models.Count -gt 0) {
   Write-Host "Done - $($models.Count) models available. Start with: opencode"
+  Write-Host "Run this command again at any time to update."
 } else {
   Write-Host "Setup finished, but no models came back."
   Write-Host "Check your LiteLLM key is in 1Password as: op://Employee/ai.apro.is litellm/API Key"
