@@ -1,66 +1,89 @@
 // Using raw js instead of ts because of a bug in opencode: Stripping types is currently unsupported for files under node_modules ... src/index.ts failed to load plugin
 
-import { basename } from "node:path"
+import os from "node:os"
 
-const DEFAULT_PROVIDER_ID = "litellm"
-const DEFAULT_HEADER_NAME = "x-github-repo"
+import {
+  BASE_URL,
+  HEADER_NAME,
+  OP_API_KEY_REF,
+  OP_GITHUB_PAT_REF,
+  PREFERRED_MODELS,
+  PREFERRED_SMALL_MODELS,
+  PROVIDER_ID,
+  PROVIDER_NAME,
+  PROVIDER_NPM,
+  defaultMcp,
+} from "./defaults.js"
+import { discoverModels } from "./litellm.js"
+import { createRepoResolver } from "./repo.js"
+import { createSecretReader } from "./secrets.js"
 
-function parseOrgRepo(url) {
-  if (!url) return null
-
-  let path = url.trim()
-  if (path.includes("://")) {
-    path = path.split("/").slice(3).join("/")
-  } else if (path.includes(":")) {
-    path = path.split(":").slice(1).join(":")
-  }
-
-  path = path.replace(/\.git$/, "").replace(/\/+$/, "")
-  const parts = path.split("/").filter(Boolean)
-  if (parts.length < 2) return null
-  return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`
+function envValue(name) {
+  const value = process.env[name]
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined
 }
 
-export default async ({ $, worktree, directory }) => {
-  const providerId = process.env.OPENCODE_LITELLM_PROVIDER_ID || DEFAULT_PROVIDER_ID
-  const headerName = process.env.OPENCODE_LITELLM_HEADER_NAME || DEFAULT_HEADER_NAME
-  const repoCache = new Map()
+function firstAvailable(ids, models, providerId) {
+  const id = ids.find((candidate) => models[candidate])
+  return id ? `${providerId}/${id}` : undefined
+}
 
-  async function gitRepoForDir(cwd) {
-    if (repoCache.has(cwd)) return repoCache.get(cwd) || null
+export default async ({ $, client, worktree, directory }) => {
+  const providerId = envValue("OPENCODE_LITELLM_PROVIDER_ID") ?? PROVIDER_ID
+  const headerName = envValue("OPENCODE_LITELLM_HEADER_NAME") ?? HEADER_NAME
+  const baseURL = envValue("OPENCODE_LITELLM_BASE_URL") ?? envValue("LITELLM_BASE_URL") ?? BASE_URL
+  const manageMcp = process.env.OPENCODE_LITELLM_MCP !== "0"
 
+  const resolveRepoLabel = createRepoResolver($, { worktree, directory })
 
-    let parsed = null
+  async function log(level, message, extra = {}) {
     try {
-      const result = await $`git -C ${cwd} remote get-url origin`.quiet().nothrow()
-      if (result.exitCode === 0) parsed = parseOrgRepo(String(result.stdout).trim())
+      await client?.app?.log?.({ body: { service: "opencode-litellm-headers", level, message, extra } })
     } catch {
-      // Fall through to the basename fallback below.
+      // Logging must never affect opencode startup.
     }
-
-    repoCache.set(cwd, parsed)
-    return parsed
   }
 
-  async function resolveRepoLabel() {
-    const candidates = Array.from(
-      new Set([process.cwd(), worktree, directory].filter((c) => typeof c === "string" && c.length > 0)),
-    )
-
-    for (const cwd of candidates) {
-      const repo = await gitRepoForDir(cwd)
-      if (repo) return repo
-    }
-
-    for (const cwd of candidates) {
-      const name = basename(cwd)
-      if (name) return name
-    }
-
-    return "unknown"
-  }
+  const warn = (message, extra) => log("warn", message, extra)
+  const secrets = createSecretReader($, { onWarning: warn })
 
   return {
+    async config(config) {
+      const wantsPat = manageMcp && !envValue("GITHUB_PERSONAL_ACCESS_TOKEN")
+      const [apiKey, githubPat] = await Promise.all([
+        envValue("LITELLM_API_KEY") ?? secrets.read(OP_API_KEY_REF, { required: true }),
+        wantsPat ? secrets.read(OP_GITHUB_PAT_REF) : envValue("GITHUB_PERSONAL_ACCESS_TOKEN"),
+      ])
+      await secrets.flush()
+
+      config.provider ??= {}
+      const provider = (config.provider[providerId] ??= {})
+      provider.name ??= PROVIDER_NAME
+      provider.npm ??= PROVIDER_NPM
+      provider.env ??= ["LITELLM_API_KEY"]
+      provider.options ??= {}
+      provider.options.baseURL ??= baseURL
+      if (apiKey && provider.options.apiKey === undefined) provider.options.apiKey = apiKey
+
+      const discovered = await discoverModels({ baseURL: provider.options.baseURL, apiKey, onWarning: warn })
+      provider.models ??= {}
+      for (const [id, model] of Object.entries(discovered)) provider.models[id] ??= model
+
+      const count = Object.keys(discovered).length
+      if (count) await log("info", `Synced ${count} LiteLLM chat models.`, { provider: providerId })
+      else await warn("No LiteLLM models discovered; keeping configured models.", { provider: providerId })
+
+      config.model ??= firstAvailable(PREFERRED_MODELS, provider.models, providerId)
+      config.small_model ??= firstAvailable(PREFERRED_SMALL_MODELS, provider.models, providerId)
+
+      if (manageMcp) {
+        config.mcp ??= {}
+        for (const [name, server] of Object.entries(defaultMcp({ githubPat, home: os.homedir() }))) {
+          config.mcp[name] ??= server
+        }
+      }
+    },
+
     "chat.headers": async (input, output) => {
       if (input.provider.id !== providerId) return
       const value = await resolveRepoLabel()
