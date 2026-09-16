@@ -6,14 +6,21 @@ It replaces the hand-copied `~/bin/opencode` wrapper and the hand-maintained mod
 
 ## Install
 
-Install OpenCode and sign in to 1Password:
+macOS / Linux:
 
 ```bash
-brew install opencode
-op signin --account aproorg.1password.eu
+curl -fsSL https://raw.githubusercontent.com/aproorg/opencode-litellm-headers/main/install.sh | bash
 ```
 
-Then write `~/.config/opencode/opencode.json`:
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/aproorg/opencode-litellm-headers/main/install.ps1 | iex
+```
+
+The installer installs OpenCode if it is missing, writes the config, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models. Set `OPENCODE_ASSUME_YES=1` to take every prompt as yes.
+
+To do it by hand instead: install OpenCode (`brew install anomalyco/tap/opencode`, `scoop install opencode`, or `npm i -g opencode-ai@latest`) and write `~/.config/opencode/opencode.json` — `%USERPROFILE%\.config\opencode\opencode.json` on Windows:
 
 ```json
 {
@@ -34,7 +41,7 @@ Run `opencode`. Bun installs the plugin on first launch and caches it under `~/.
 | Provider | `litellm` → `@ai-sdk/openai-compatible` against `https://litellm.ai.apro.is/v1` |
 | Models | `GET /model_group/info`, filtered to `mode == "chat"`, with context/output limits, per-million costs and capabilities. Cached 6h |
 | Defaults | `model` and `small_model` set to the first available of a preferred list |
-| MCP | memory, sequentialthinking, filesystem, fetch, time, git, and github (PAT from 1Password) |
+| MCP | memory, sequentialthinking, filesystem (via `npx`, else `bunx`), fetch, time, git (via `uvx`), and github. Servers whose runner is not installed are skipped rather than registered broken |
 | Headers | `x-github-repo: <org>/<repo>`, resolved per request from the active directory's git remote |
 
 Anything you define yourself wins: the plugin only fills in keys that are absent, so a model, MCP server or provider option in your own `opencode.json` is never overwritten.
