@@ -1,20 +1,15 @@
 // Using raw js instead of ts because of a bug in opencode: Stripping types is currently unsupported for files under node_modules ... src/index.ts failed to load plugin
 
-import os from "node:os"
-
 import {
   BASE_URL,
   HEADER_NAME,
   MODEL_GROUPS,
   OP_API_KEY_REF,
-  OP_GITHUB_PAT_REF,
   PREFERRED_MODELS,
   PREFERRED_SMALL_MODELS,
   PROVIDER_ID,
   PROVIDER_NAME,
   PROVIDER_NPM,
-  defaultMcp,
-  resolveRunners,
 } from "./defaults.js"
 import { discoverModels } from "./litellm.js"
 import { createRepoResolver } from "./repo.js"
@@ -23,14 +18,6 @@ import { createSecretReader } from "./secrets.js"
 function envValue(name) {
   const value = process.env[name]
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined
-}
-
-function whichCommand(name) {
-  try {
-    return typeof Bun !== "undefined" && typeof Bun.which === "function" ? Bun.which(name) : name
-  } catch {
-    return undefined
-  }
 }
 
 function groupFor(modelId, baseId) {
@@ -47,7 +34,6 @@ export default async ({ $, client, worktree, directory }) => {
   const providerId = envValue("OPENCODE_LITELLM_PROVIDER_ID") ?? PROVIDER_ID
   const headerName = envValue("OPENCODE_LITELLM_HEADER_NAME") ?? HEADER_NAME
   const baseURL = envValue("OPENCODE_LITELLM_BASE_URL") ?? envValue("LITELLM_BASE_URL") ?? BASE_URL
-  const manageMcp = process.env.OPENCODE_LITELLM_MCP !== "0"
 
   const ourProviderIds = new Set([providerId, ...MODEL_GROUPS.map(({ suffix }) => `${providerId}-${suffix}`)])
 
@@ -66,11 +52,7 @@ export default async ({ $, client, worktree, directory }) => {
 
   return {
     async config(config) {
-      const wantsPat = manageMcp && !envValue("GITHUB_PERSONAL_ACCESS_TOKEN")
-      const [apiKey, githubPat] = await Promise.all([
-        envValue("LITELLM_API_KEY") ?? secrets.read(OP_API_KEY_REF, { required: true }),
-        wantsPat ? secrets.read(OP_GITHUB_PAT_REF) : envValue("GITHUB_PERSONAL_ACCESS_TOKEN"),
-      ])
+      const apiKey = envValue("LITELLM_API_KEY") ?? (await secrets.read(OP_API_KEY_REF, { required: true }))
       await secrets.flush()
 
       config.provider ??= {}
@@ -109,13 +91,6 @@ export default async ({ $, client, worktree, directory }) => {
       config.model ??= firstAvailable(PREFERRED_MODELS, placed)
       config.small_model ??= firstAvailable(PREFERRED_SMALL_MODELS, placed)
 
-      if (manageMcp) {
-        const runners = resolveRunners(whichCommand)
-        config.mcp ??= {}
-        for (const [name, server] of Object.entries(defaultMcp({ githubPat, home: os.homedir(), runners }))) {
-          config.mcp[name] ??= server
-        }
-      }
     },
 
     "chat.headers": async (input, output) => {
