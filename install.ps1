@@ -29,6 +29,16 @@ Write-Host "opencode $(opencode --version) at $((Get-Command opencode).Source)"
 # 2. config: add the plugin, retire settings the plugin now manages
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
 
+# opencode.json is the file we manage; config.json and opencode.jsonc also load and would override it.
+foreach ($other in @("opencode.jsonc", "config.json")) {
+  $otherPath = Join-Path $ConfigDir $other
+  if (Test-Path $otherPath) {
+    $moved = "$otherPath.bak-$(Get-Date -Format yyyyMMddHHmmss)"
+    Move-Item $otherPath $moved
+    Write-Host "Moved $other aside - it overrides opencode.json. Old settings: $moved"
+  }
+}
+
 $config = [ordered]@{}
 if (Test-Path $ConfigPath) {
   Copy-Item $ConfigPath "$ConfigPath.bak-$(Get-Date -Format yyyyMMddHHmmss)"

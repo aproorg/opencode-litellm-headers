@@ -18,7 +18,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/aproorg/opencode-litellm-headers/main/install.ps1 | iex
 ```
 
-The installer installs OpenCode if it is missing, writes the config, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models. Set `OPENCODE_ASSUME_YES=1` to take every prompt as yes.
+The installer installs OpenCode if it is missing, writes the config, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models. `opencode.json` is the file it manages: a `config.json` or `opencode.jsonc` in the same directory loads after it and would override it, so those are renamed to `*.bak-<timestamp>` and the path is printed. Set `OPENCODE_ASSUME_YES=1` to take every prompt as yes.
 
 To do it by hand instead: install OpenCode (`brew install anomalyco/tap/opencode`, `scoop install opencode`, or `npm i -g opencode-ai@latest`) and write `~/.config/opencode/opencode.json` — `%USERPROFILE%\.config\opencode\opencode.json` on Windows:
 

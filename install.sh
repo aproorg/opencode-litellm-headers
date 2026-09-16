@@ -26,6 +26,16 @@ say "opencode $(opencode --version 2>/dev/null || echo '?') at $(command -v open
 
 # 2. config: add the plugin, retire settings the plugin now manages
 mkdir -p "$CONFIG_DIR"
+
+# opencode.json is the file we manage; config.json and opencode.jsonc also load and would override it.
+for other in "$CONFIG_DIR/opencode.jsonc" "$CONFIG_DIR/config.json"; do
+  if [ -f "$other" ]; then
+    moved="$other.bak-$(date +%Y%m%d%H%M%S)"
+    mv "$other" "$moved"
+    say "Moved $(basename "$other") aside — it overrides opencode.json. Old settings: $moved"
+  fi
+done
+
 [ -f "$CONFIG" ] || printf '{\n  "$schema": "https://opencode.ai/config.json"\n}\n' > "$CONFIG"
 
 STALE=$(python3 - "$CONFIG" <<'PY'
