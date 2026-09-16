@@ -10,8 +10,8 @@ export const OP_API_KEY_REF = "op://Employee/ai.apro.is litellm/API Key"
 export const OP_GITHUB_PAT_REF = "op://Employee/Claude Code Github PAT/PAT"
 
 // First id present in the synced model list wins.
-export const PREFERRED_MODELS = ["claude-opus-5", "claude-opus-4-8", "claude-sonnet-5"]
-export const PREFERRED_SMALL_MODELS = ["claude-haiku-4-5", "gemini-3.8-flash"]
+export const PREFERRED_MODELS = ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]
+export const PREFERRED_SMALL_MODELS = ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]
 
 // npx/bunx and uvx are optional: servers whose runner is missing are skipped, not registered broken.
 export function resolveRunners(which) {
