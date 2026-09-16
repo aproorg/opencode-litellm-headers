@@ -1,6 +1,6 @@
 # opencode-litellm-headers
 
-OpenCode plugin that configures Apró's LiteLLM gateway for you: it fetches your API key from 1Password, declares the provider, syncs the live model list, registers the shared MCP servers, and injects the mandatory `x-github-repo` header on every request.
+OpenCode plugin that configures Apró's LiteLLM gateway for you: it fetches your API key from 1Password, declares the providers, syncs the live model list, and injects the mandatory `x-github-repo` header on every request.
 
 It replaces the hand-copied `~/bin/opencode` wrapper and the hand-maintained model list in `opencode.json`.
 
@@ -50,7 +50,7 @@ The config it writes is one entry:
 | Headers | `x-github-repo: <org>/<repo>`, resolved per request from the active directory's git remote |
 | OpenCode Zen | Disabled, since its models are not served by the gateway. Set `disabled_providers` yourself to keep it |
 
-Anything you define yourself wins: the plugin only fills in keys that are absent, so a model, MCP server or provider option in your own `opencode.json` is never overwritten.
+Anything you define yourself wins: the plugin only fills in keys that are absent, so a model or provider option in your own `opencode.json` is never overwritten.
 
 ## Configuration
 
@@ -72,10 +72,10 @@ opencode mcp add
 ## Verify
 
 ```bash
-opencode models --provider litellm   # the live chat models, no hand-maintained list
+opencode models          # the live chat models across all four providers
 ```
 
-Avoid `opencode debug config` for this: it dumps the fully resolved config, including the API key and the GitHub PAT, with no redaction — don't paste its output into Slack or an issue.
+Avoid `opencode debug config` for this: it dumps the fully resolved config, including the API key, with no redaction — don't paste its output into Slack or an issue.
 
 To force a refresh of the model list or the cached key:
 
@@ -85,9 +85,9 @@ rm -rf ~/.cache/opencode-apro
 
 ## Migrating from the wrapper
 
-1. Delete `~/bin/opencode` (the wrapper that exported `LITELLM_API_KEY` and `OPENCODE_GITHUB_REPO`).
-2. Remove the `provider`, `model`, `small_model` and `mcp` blocks from `~/.config/opencode/opencode.json`, leaving `$schema` and `plugin`. Stale model ids left in that file keep showing up in the picker, because your own config takes precedence.
-3. Run `opencode` — the first launch pays ~5s for the 1Password read, later launches are warm.
+The installer handles it: it replaces any earlier plugin entry, offers to remove the `provider`, `model`, `small_model` and `mcp` blocks the plugin now manages, and keeps a timestamped backup of your config. Stale model ids left in that file keep showing in the picker, because your own config takes precedence.
+
+One thing it does not touch: delete `~/bin/opencode` yourself if you still have the wrapper that exported `LITELLM_API_KEY` and `OPENCODE_GITHUB_REPO`.
 
 ## How it works
 
@@ -102,20 +102,20 @@ git clone https://github.com/aproorg/opencode-litellm-headers.git
 cd opencode-litellm-headers
 ```
 
-Test against an isolated config without touching your own:
+Test against an isolated config without touching your own. Isolate with `HOME`, not `OPENCODE_CONFIG_DIR` — that one adds a config directory rather than replacing the real one, and other tooling sets it:
 
 ```bash
-mkdir -p /tmp/octest/opencode/plugin
-echo '{"$schema":"https://opencode.ai/config.json"}' > /tmp/octest/opencode/opencode.json
-echo 'export { default } from "'"$PWD"'/src/index.js"' > /tmp/octest/opencode/plugin/apro.js
-HOME=/tmp/octest-home OPENCODE_CONFIG_DIR=/tmp/octest/opencode opencode models --provider litellm
+mkdir -p /tmp/octest/.config/opencode
+printf '{"$schema":"https://opencode.ai/config.json","plugin":["file://%s/src/index.js"]}\n' "$PWD" \
+  > /tmp/octest/.config/opencode/opencode.json
+HOME=/tmp/octest LITELLM_API_KEY=... opencode models
 ```
 
-Plain JavaScript, no build step: OpenCode cannot strip types from files under `node_modules`, so the sources stay `.js`.
+Plain JavaScript, no build step.
 
 ## Prior art
 
-The `config` + `provider.models` approach to model discovery follows [yuyu1025/opencode-plugin-litellm](https://github.com/yuyu1025/opencode-plugin-litellm) (MIT). This plugin is an independent implementation: it reads `/model_group/info` for cost and capability metadata, filters non-chat models, and adds 1Password, MCP and header handling.
+The `config` + `provider.models` approach to model discovery follows [yuyu1025/opencode-plugin-litellm](https://github.com/yuyu1025/opencode-plugin-litellm) (MIT). This plugin is an independent implementation: it reads `/model_group/info` for cost and capability metadata, filters non-chat models, and adds 1Password and header handling.
 
 ## License
 
