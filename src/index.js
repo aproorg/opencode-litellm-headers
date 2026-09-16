@@ -5,6 +5,7 @@ import os from "node:os"
 import {
   BASE_URL,
   HEADER_NAME,
+  MODEL_GROUPS,
   OP_API_KEY_REF,
   OP_GITHUB_PAT_REF,
   PREFERRED_MODELS,
@@ -32,9 +33,14 @@ function whichCommand(name) {
   }
 }
 
-function firstAvailable(ids, models, providerId) {
-  const id = ids.find((candidate) => models[candidate])
-  return id ? `${providerId}/${id}` : undefined
+function groupFor(modelId, baseId) {
+  const group = MODEL_GROUPS.find(({ prefix }) => modelId.startsWith(prefix))
+  return group ? `${baseId}-${group.suffix}` : baseId
+}
+
+function firstAvailable(ids, placed) {
+  const id = ids.find((candidate) => placed[candidate])
+  return id ? `${placed[id]}/${id}` : undefined
 }
 
 export default async ({ $, client, worktree, directory }) => {
@@ -42,6 +48,8 @@ export default async ({ $, client, worktree, directory }) => {
   const headerName = envValue("OPENCODE_LITELLM_HEADER_NAME") ?? HEADER_NAME
   const baseURL = envValue("OPENCODE_LITELLM_BASE_URL") ?? envValue("LITELLM_BASE_URL") ?? BASE_URL
   const manageMcp = process.env.OPENCODE_LITELLM_MCP !== "0"
+
+  const ourProviderIds = new Set([providerId, ...MODEL_GROUPS.map(({ suffix }) => `${providerId}-${suffix}`)])
 
   const resolveRepoLabel = createRepoResolver($, { worktree, directory })
 
@@ -66,24 +74,37 @@ export default async ({ $, client, worktree, directory }) => {
       await secrets.flush()
 
       config.provider ??= {}
-      const provider = (config.provider[providerId] ??= {})
-      provider.name ??= PROVIDER_NAME
-      provider.npm ??= PROVIDER_NPM
-      provider.env ??= ["LITELLM_API_KEY"]
-      provider.options ??= {}
-      provider.options.baseURL ??= baseURL
-      if (apiKey && provider.options.apiKey === undefined) provider.options.apiKey = apiKey
 
-      const discovered = await discoverModels({ baseURL: provider.options.baseURL, apiKey, onWarning: warn })
-      provider.models ??= {}
-      for (const [id, model] of Object.entries(discovered)) provider.models[id] ??= model
+      function ensureProvider(id, name) {
+        const provider = (config.provider[id] ??= {})
+        provider.name ??= name
+        provider.npm ??= PROVIDER_NPM
+        provider.env ??= ["LITELLM_API_KEY"]
+        provider.options ??= {}
+        provider.options.baseURL ??= baseURL
+        if (apiKey && provider.options.apiKey === undefined) provider.options.apiKey = apiKey
+        provider.models ??= {}
+        return provider
+      }
+
+      const root = ensureProvider(providerId, PROVIDER_NAME)
+      const discovered = await discoverModels({ baseURL: root.options.baseURL, apiKey, onWarning: warn })
+
+      const placed = {}
+      for (const [id, model] of Object.entries(discovered)) {
+        const target = groupFor(id, providerId)
+        const group = MODEL_GROUPS.find(({ suffix }) => target === `${providerId}-${suffix}`)
+        const provider = target === providerId ? root : ensureProvider(target, group.name)
+        provider.models[id] ??= model
+        placed[id] = target
+      }
 
       const count = Object.keys(discovered).length
       if (count) await log("info", `Synced ${count} LiteLLM chat models.`, { provider: providerId })
       else await warn("No LiteLLM models discovered; keeping configured models.", { provider: providerId })
 
-      config.model ??= firstAvailable(PREFERRED_MODELS, provider.models, providerId)
-      config.small_model ??= firstAvailable(PREFERRED_SMALL_MODELS, provider.models, providerId)
+      config.model ??= firstAvailable(PREFERRED_MODELS, placed)
+      config.small_model ??= firstAvailable(PREFERRED_SMALL_MODELS, placed)
 
       if (manageMcp) {
         const runners = resolveRunners(whichCommand)
@@ -95,7 +116,7 @@ export default async ({ $, client, worktree, directory }) => {
     },
 
     "chat.headers": async (input, output) => {
-      if (input.provider.id !== providerId) return
+      if (!ourProviderIds.has(input.provider.id)) return
       const value = await resolveRepoLabel()
       if (value) output.headers[headerName] = value
     },
