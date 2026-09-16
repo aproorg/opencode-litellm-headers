@@ -1,6 +1,7 @@
 import { isFresh, readCache, writeCache } from "./cache.js"
 
 const TTL_MS = 6 * 60 * 60 * 1000
+const FALLBACK_TTL_MS = 10 * 60 * 1000
 const TIMEOUT_MS = 8000
 
 function cacheName(baseURL) {
@@ -69,13 +70,15 @@ function fromGroupInfo(body) {
 }
 
 // /v1/models: id, mode and token limits only. Used when model_group/info is unavailable.
+// Entries without a declared mode are not chat models — embeddings, rerank and OCR
+// models come back that way and must never reach the picker.
 function fromModelList(body) {
   const items = Array.isArray(body?.data) ? body.data : []
   const models = {}
 
   for (const item of items) {
     const id = typeof item?.id === "string" ? item.id.trim() : ""
-    if (!id || (item.mode && item.mode !== "chat")) continue
+    if (!id || item.mode !== "chat") continue
 
     models[id] = {
       name: id,
@@ -99,15 +102,19 @@ function sorted(models) {
 export async function discoverModels({ baseURL, apiKey, timeoutMs = TIMEOUT_MS, onWarning } = {}) {
   const name = cacheName(baseURL)
   const cached = await readCache(name)
-  if (isFresh(cached, TTL_MS) && Object.keys(cached.models ?? {}).length) return cached.models
+  if (isFresh(cached, cached?.degraded ? FALLBACK_TTL_MS : TTL_MS) && Object.keys(cached.models ?? {}).length) {
+    return cached.models
+  }
 
   const root = rootOf(baseURL)
   let models = {}
+  let degraded = false
 
   try {
     models = fromGroupInfo(await getJson(`${root}/model_group/info`, apiKey, timeoutMs))
   } catch (error) {
     onWarning?.("model_group/info unavailable, falling back to /v1/models", { error: String(error) })
+    degraded = true
     try {
       models = fromModelList(await getJson(`${root}/v1/models`, apiKey, timeoutMs))
     } catch (fallbackError) {
@@ -117,7 +124,13 @@ export async function discoverModels({ baseURL, apiKey, timeoutMs = TIMEOUT_MS, 
 
   if (!Object.keys(models).length) return cached?.models ?? {}
 
+  // The fallback carries no cost or capability data: keep richer cached models rather than thin ones.
+  if (degraded && !cached?.degraded && Object.keys(cached?.models ?? {}).length) {
+    onWarning?.("keeping cached model metadata instead of the degraded fallback")
+    return cached.models
+  }
+
   models = sorted(models)
-  await writeCache(name, { ts: Date.now(), models }, { mode: 0o644 })
+  await writeCache(name, { ts: Date.now(), models, degraded }, { mode: 0o644 })
   return models
 }
