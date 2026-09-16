@@ -61,9 +61,10 @@ Anything you define yourself wins: the plugin only fills in keys that are absent
 
 ```bash
 opencode models --provider litellm   # the live chat models, no hand-maintained list
-opencode debug config                # resolved provider, defaults and MCP servers
 opencode mcp list                    # MCP servers and their connection state
 ```
+
+Avoid `opencode debug config` for this: it dumps the fully resolved config, including the API key and the GitHub PAT, with no redaction — don't paste its output into Slack or an issue.
 
 To force a refresh of the model list or the cached key:
 
