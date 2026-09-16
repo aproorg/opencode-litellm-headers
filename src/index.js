@@ -13,6 +13,7 @@ import {
   PROVIDER_NAME,
   PROVIDER_NPM,
   defaultMcp,
+  resolveRunners,
 } from "./defaults.js"
 import { discoverModels } from "./litellm.js"
 import { createRepoResolver } from "./repo.js"
@@ -21,6 +22,14 @@ import { createSecretReader } from "./secrets.js"
 function envValue(name) {
   const value = process.env[name]
   return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined
+}
+
+function whichCommand(name) {
+  try {
+    return typeof Bun !== "undefined" && typeof Bun.which === "function" ? Bun.which(name) : name
+  } catch {
+    return undefined
+  }
 }
 
 function firstAvailable(ids, models, providerId) {
@@ -77,8 +86,9 @@ export default async ({ $, client, worktree, directory }) => {
       config.small_model ??= firstAvailable(PREFERRED_SMALL_MODELS, provider.models, providerId)
 
       if (manageMcp) {
+        const runners = resolveRunners(whichCommand)
         config.mcp ??= {}
-        for (const [name, server] of Object.entries(defaultMcp({ githubPat, home: os.homedir() }))) {
+        for (const [name, server] of Object.entries(defaultMcp({ githubPat, home: os.homedir(), runners }))) {
           config.mcp[name] ??= server
         }
       }
