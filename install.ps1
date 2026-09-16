@@ -5,7 +5,8 @@ $ErrorActionPreference = "Stop"
 
 $Plugin = if ($env:OPENCODE_LITELLM_PLUGIN_SPEC) { $env:OPENCODE_LITELLM_PLUGIN_SPEC }
           else { "@aproorg/opencode-litellm-headers@git+https://github.com/aproorg/opencode-litellm-headers.git" }
-$ConfigDir = if ($env:OPENCODE_CONFIG_DIR) { $env:OPENCODE_CONFIG_DIR } else { Join-Path $HOME ".config\opencode" }
+# Not OPENCODE_CONFIG_DIR: other tooling sets that, and we would write into its config.
+$ConfigDir = if ($env:OPENCODE_LITELLM_CONFIG_DIR) { $env:OPENCODE_LITELLM_CONFIG_DIR } else { Join-Path $HOME ".config\opencode" }
 $ConfigPath = Join-Path $ConfigDir "opencode.json"
 
 function Have($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
@@ -85,7 +86,7 @@ if (-not (Have "uvx")) {
 # 4. first launch: install the plugin, fetch the model list
 Write-Host ""
 Write-Host "Setting up (first run downloads the plugin and syncs models)..."
-$models = @(opencode models --provider litellm 2>$null | Where-Object { $_ })
+$models = @(opencode models 2>$null | Where-Object { $_ -match "^litellm(/|-)" })
 
 Write-Host ""
 if ($models.Count -gt 0) {
@@ -93,6 +94,6 @@ if ($models.Count -gt 0) {
 } else {
   Write-Host "Setup finished, but no models came back."
   Write-Host "Check your LiteLLM key is in 1Password as: op://Employee/ai.apro.is litellm/API Key"
-  Write-Host "Then run: op signin --account aproorg.1password.eu; opencode models --provider litellm"
+  Write-Host "Then run: op signin --account aproorg.1password.eu; opencode models"
   exit 1
 }
