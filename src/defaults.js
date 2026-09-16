@@ -1,5 +1,14 @@
 export const PROVIDER_ID = "litellm"
 export const PROVIDER_NAME = "LiteLLM"
+
+// The picker groups by provider. Ids stay prefixed so they never collide with the
+// models.dev entries for anthropic/google/openai, which would merge in models the
+// gateway does not serve. Anything unmatched stays in the catch-all provider.
+export const MODEL_GROUPS = [
+  { suffix: "anthropic", name: "Anthropic", prefix: "claude-" },
+  { suffix: "google", name: "Google", prefix: "gemini-" },
+  { suffix: "openai", name: "OpenAI", prefix: "gpt-" },
+]
 export const PROVIDER_NPM = "@ai-sdk/openai-compatible"
 export const HEADER_NAME = "x-github-repo"
 
