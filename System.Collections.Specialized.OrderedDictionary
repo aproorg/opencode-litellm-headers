@@ -1,6 +1,0 @@
-{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    "@aproorg/opencode-litellm-headers@git+https://github.com/aproorg/opencode-litellm-headers.git#feat/config-hook-provider-and-model-sync"
-  ]
-}
