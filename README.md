@@ -1,21 +1,26 @@
 # opencode-litellm-headers
 
-OpenCode plugin that injects an `x-github-repo` header into LiteLLM AI requests for per-repository usage attribution. Drop-in replacement for the `ANTHROPIC_CUSTOM_HEADERS` env-var trick used with Claude Code.
+OpenCode plugin that configures Apró's LiteLLM gateway for you: it fetches your API key from 1Password, declares the provider, syncs the live model list, registers the shared MCP servers, and injects the mandatory `x-github-repo` header on every request.
 
-## Why this plugin
-
-OpenCode's `provider.options.headers` field supports `{env:VARNAME}` substitution, but it resolves once at process startup. The value freezes at boot and does not follow `cd` between repos within a session. The `shell.env` plugin hook only injects variables into shell commands the agent runs — it does not reach OpenCode's own AI requests. Custom proxies are unnecessary complexity.
-
-OpenCode 1.4+ exposes a dedicated `chat.headers` plugin hook that fires before every AI request. This plugin uses that hook to:
-
-- Detect the active git repository per-request via `git remote get-url origin`
-- Filter on a configurable provider ID (default: `litellm`) so other providers are untouched
-- Cache lookups per working directory
-- Fall back to the directory basename if no git remote is found
+It replaces the hand-copied `~/bin/opencode` wrapper and the hand-maintained model list in `opencode.json`.
 
 ## Install
 
-In your `~/.config/opencode/opencode.json`:
+macOS / Linux:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/aproorg/opencode-litellm-headers/main/install.sh | bash
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/aproorg/opencode-litellm-headers/main/install.ps1 | iex
+```
+
+The installer installs OpenCode if it is missing, writes the config, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models. `opencode.json` is the file it manages: a `config.json` or `opencode.jsonc` in the same directory loads after it and would override it, so those are renamed to `*.bak-<timestamp>` and the path is printed. Set `OPENCODE_ASSUME_YES=1` to take every prompt as yes.
+
+To do it by hand instead: install OpenCode (`brew install anomalyco/tap/opencode`, `scoop install opencode`, or `npm i -g opencode-ai@latest`) and write `~/.config/opencode/opencode.json` — `%USERPROFILE%\.config\opencode\opencode.json` on Windows:
 
 ```json
 {
@@ -26,58 +31,80 @@ In your `~/.config/opencode/opencode.json`:
 }
 ```
 
-Restart OpenCode. It will run `bun install` automatically and load the plugin.
+Run `opencode`. Bun installs the plugin on first launch and caches it under `~/.cache/opencode/packages/`.
+
+## What the plugin sets up
+
+| Area | Behaviour |
+| --- | --- |
+| API key | `op read "op://Employee/ai.apro.is litellm/API Key"`, cached 12h in `~/.cache/opencode-apro/secrets.json` (mode 0600) |
+| Provider | `litellm` → `@ai-sdk/openai-compatible` against `https://litellm.ai.apro.is/v1` |
+| Models | `GET /model_group/info`, filtered to `mode == "chat"`, with context/output limits, per-million costs and capabilities. Cached 6h |
+| Defaults | `model` and `small_model` set to the first available of a preferred list |
+| MCP | memory, sequentialthinking, filesystem (via `npx`, else `bunx`), fetch, time, git (via `uvx`), and github. Servers whose runner is not installed are skipped rather than registered broken |
+| Headers | `x-github-repo: <org>/<repo>`, resolved per request from the active directory's git remote |
+
+Anything you define yourself wins: the plugin only fills in keys that are absent, so a model, MCP server or provider option in your own `opencode.json` is never overwritten.
 
 ## Configuration
 
-The plugin reads two optional environment variables:
-
-| Variable                          | Default          | Purpose                                                              |
-| --------------------------------- | ---------------- | -------------------------------------------------------------------- |
-| `OPENCODE_LITELLM_PROVIDER_ID`    | `litellm`        | Provider ID to match. Must equal the key used in your `provider` config. |
-| `OPENCODE_LITELLM_HEADER_NAME`    | `x-github-repo`  | Outgoing header name.                                                |
-
-If your `opencode.json` defines the LiteLLM provider under a different key (say `"my-gateway"`), export `OPENCODE_LITELLM_PROVIDER_ID=my-gateway` before launching OpenCode.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `LITELLM_API_KEY` | — | Use this key instead of reading 1Password |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | — | Use this PAT for the github MCP server instead of reading 1Password |
+| `OPENCODE_LITELLM_BASE_URL` | `https://litellm.ai.apro.is/v1` | Gateway to talk to |
+| `OPENCODE_LITELLM_PROVIDER_ID` | `litellm` | Provider key in your config |
+| `OPENCODE_LITELLM_HEADER_NAME` | `x-github-repo` | Outgoing header name |
+| `OPENCODE_LITELLM_MCP` | unset | Set to `0` to manage MCP servers yourself |
 
 ## Verify
 
-Send a trivial prompt in a known repo and check your LiteLLM logs for the inbound request — you should see:
+```bash
+opencode models --provider litellm   # the live chat models, no hand-maintained list
+opencode mcp list                    # MCP servers and their connection state
+```
 
+Avoid `opencode debug config` for this: it dumps the fully resolved config, including the API key and the GitHub PAT, with no redaction — don't paste its output into Slack or an issue.
+
+To force a refresh of the model list or the cached key:
+
+```bash
+rm -rf ~/.cache/opencode-apro
 ```
-x-github-repo: your-org/your-repo
-```
+
+## Migrating from the wrapper
+
+1. Delete `~/bin/opencode` (the wrapper that exported `LITELLM_API_KEY` and `OPENCODE_GITHUB_REPO`).
+2. Remove the `provider`, `model`, `small_model` and `mcp` blocks from `~/.config/opencode/opencode.json`, leaving `$schema` and `plugin`. Stale model ids left in that file keep showing up in the picker, because your own config takes precedence.
+3. Run `opencode` — the first launch pays ~5s for the 1Password read, later launches are warm.
 
 ## How it works
 
-1. Plugin loads at startup from your `opencode.json` `plugin` array.
-2. On every AI request, the `chat.headers` hook fires.
-3. Plugin checks `input.provider.id` against the configured provider ID. Other providers (MCP servers, future additions) are skipped.
-4. It runs `git -C <worktree> remote get-url origin`, parses the org/repo pair, and caches the result keyed on the working directory.
-5. Sets `output.headers[headerName] = "<org>/<repo>"`.
-6. If no git remote is found, falls back to the directory basename so the request is still attributed.
+OpenCode's config file is static JSON: it can substitute `{env:VAR}` but cannot run a command, which is why the setup used to need a shell wrapper to export secrets first. A plugin is code, and OpenCode runs the `config` hook on the loaded config before it builds providers and MCP servers — so the plugin does that work in-process instead.
 
-## Comparison with Claude Code
-
-| Aspect              | Claude Code (`ANTHROPIC_CUSTOM_HEADERS`)    | OpenCode (this plugin)                            |
-| ------------------- | ------------------------------------------- | ------------------------------------------------- |
-| Mechanism           | Env var read by Claude Code at startup      | `chat.headers` plugin hook                        |
-| Repo detected when  | Shell launch (frozen for process life)      | Per-request (tracks cwd changes)                  |
-| Provider scope      | All Anthropic requests                      | Filtered to the configured provider only          |
-| Fallback            | Empty header                                | Directory basename                                |
+The `x-github-repo` header goes through the `chat.headers` hook, which fires before every AI request. `provider.options.headers` with `{env:VAR}` resolves once at startup and freezes for the life of the process; the hook re-resolves per request, so the header follows you when you `cd` between repos. It filters on `input.provider.id`, so other providers are untouched, and falls back to the directory basename when there is no git remote.
 
 ## Development
 
 ```bash
 git clone https://github.com/aproorg/opencode-litellm-headers.git
 cd opencode-litellm-headers
-bun install
 ```
 
-To test locally without publishing, place the plugin in your config directory:
+Test against an isolated config without touching your own:
 
 ```bash
-ln -s "$(pwd)/src/index.ts" ~/.config/opencode/plugins/litellm-headers.ts
+mkdir -p /tmp/octest/opencode/plugin
+echo '{"$schema":"https://opencode.ai/config.json"}' > /tmp/octest/opencode/opencode.json
+echo 'export { default } from "'"$PWD"'/src/index.js"' > /tmp/octest/opencode/plugin/apro.js
+HOME=/tmp/octest-home OPENCODE_CONFIG_DIR=/tmp/octest/opencode opencode models --provider litellm
 ```
+
+Plain JavaScript, no build step: OpenCode cannot strip types from files under `node_modules`, so the sources stay `.js`.
+
+## Prior art
+
+The `config` + `provider.models` approach to model discovery follows [yuyu1025/opencode-plugin-litellm](https://github.com/yuyu1025/opencode-plugin-litellm) (MIT). This plugin is an independent implementation: it reads `/model_group/info` for cost and capability metadata, filters non-chat models, and adds 1Password, MCP and header handling.
 
 ## License
 

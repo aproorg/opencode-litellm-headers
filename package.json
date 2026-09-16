@@ -1,8 +1,8 @@
 {
   "name": "@aproorg/opencode-litellm-headers",
-  "version": "0.2.0",
-  "description": "OpenCode plugin that injects an x-github-repo header into LiteLLM requests for per-repository usage attribution.",
-  "main": "src/index.ts",
+  "version": "0.3.0",
+  "description": "OpenCode plugin for Apr\u00f3's LiteLLM gateway: provider setup, 1Password key, live model sync and the x-github-repo attribution header.",
+  "main": "src/index.js",
   "type": "module",
   "files": [
     "src",
