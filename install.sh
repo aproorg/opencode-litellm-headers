@@ -2,7 +2,8 @@
 set -euo pipefail
 
 PLUGIN="${OPENCODE_LITELLM_PLUGIN_SPEC:-@aproorg/opencode-litellm-headers@git+https://github.com/aproorg/opencode-litellm-headers.git}"
-CONFIG_DIR="${OPENCODE_CONFIG_DIR:-$HOME/.config/opencode}"
+# Not OPENCODE_CONFIG_DIR: other tooling sets that, and we would write into its config.
+CONFIG_DIR="${OPENCODE_LITELLM_CONFIG_DIR:-$HOME/.config/opencode}"
 CONFIG="$CONFIG_DIR/opencode.json"
 TS=$(date +%Y%m%d%H%M%S)
 
@@ -91,7 +92,7 @@ fi
 # 4. first launch: install the plugin, fetch the model list
 say ""
 say "Setting up (first run downloads the plugin and syncs models)..."
-COUNT=$(opencode models --provider litellm 2>/dev/null | grep -c . || true)
+COUNT=$(opencode models 2>/dev/null | grep -cE "^litellm(/|-)" || true)
 
 say ""
 if [ "$COUNT" -gt 0 ]; then
@@ -99,6 +100,6 @@ if [ "$COUNT" -gt 0 ]; then
 else
   say "Setup finished, but no models came back."
   say "Check your LiteLLM key is in 1Password as: op://Employee/ai.apro.is litellm/API Key"
-  say "Then run: op signin --account aproorg.1password.eu && opencode models --provider litellm"
+  say "Then run: op signin --account aproorg.1password.eu && opencode models"
   exit 1
 fi

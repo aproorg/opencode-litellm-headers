@@ -44,6 +44,7 @@ Run `opencode`. Bun installs the plugin on first launch and caches it under `~/.
 | Defaults | `model` and `small_model` set to the first available of a preferred list |
 | MCP | memory, sequentialthinking, filesystem (via `npx`, else `bunx`), fetch, time, git (via `uvx`), and github. Servers whose runner is not installed are skipped rather than registered broken |
 | Headers | `x-github-repo: <org>/<repo>`, resolved per request from the active directory's git remote |
+| OpenCode Zen | Disabled, since its models are not served by the gateway. Set `disabled_providers` yourself to keep it |
 
 Anything you define yourself wins: the plugin only fills in keys that are absent, so a model, MCP server or provider option in your own `opencode.json` is never overwritten.
 
