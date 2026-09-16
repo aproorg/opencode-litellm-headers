@@ -36,13 +36,15 @@ function modalities(supportsVision) {
 }
 
 // /model_group/info: full metadata (limits, cost, capabilities).
+// Only a declared non-chat mode excludes a model: embeddings, rerank, OCR and
+// image/video models say what they are, while chat models may declare nothing.
 function fromGroupInfo(body) {
   const groups = Array.isArray(body?.data) ? body.data : Array.isArray(body) ? body : []
   const models = {}
 
   for (const group of groups) {
     const id = typeof group?.model_group === "string" ? group.model_group.trim() : ""
-    if (!id || group.mode !== "chat") continue
+    if (!id || (group.mode && group.mode !== "chat")) continue
 
     const entry = {
       name: id,
@@ -70,15 +72,13 @@ function fromGroupInfo(body) {
 }
 
 // /v1/models: id, mode and token limits only. Used when model_group/info is unavailable.
-// Entries without a declared mode are not chat models — embeddings, rerank and OCR
-// models come back that way and must never reach the picker.
 function fromModelList(body) {
   const items = Array.isArray(body?.data) ? body.data : []
   const models = {}
 
   for (const item of items) {
     const id = typeof item?.id === "string" ? item.id.trim() : ""
-    if (!id || item.mode !== "chat") continue
+    if (!id || (item.mode && item.mode !== "chat")) continue
 
     models[id] = {
       name: id,
