@@ -43,7 +43,6 @@ Run `opencode`. Bun installs the plugin on first launch and caches it under `~/.
 | Reasoning effort | Each model's effort options come from the gateway's `supported_reasoning_efforts`, instead of OpenCode's hardcoded low/medium/high |
 | Grouping | `claude-*` under **Anthropic**, `gemini-*` under **Google**, `gpt-*` under **OpenAI**, everything else under **LiteLLM** |
 | Defaults | `model` and `small_model` set to the first available of a preferred list |
-| MCP | memory, sequentialthinking, filesystem (via `npx`, else `bunx`), fetch, time, git (via `uvx`), and github. Servers whose runner is not installed are skipped rather than registered broken |
 | Headers | `x-github-repo: <org>/<repo>`, resolved per request from the active directory's git remote |
 | OpenCode Zen | Disabled, since its models are not served by the gateway. Set `disabled_providers` yourself to keep it |
 
@@ -54,17 +53,22 @@ Anything you define yourself wins: the plugin only fills in keys that are absent
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `LITELLM_API_KEY` | — | Use this key instead of reading 1Password |
-| `GITHUB_PERSONAL_ACCESS_TOKEN` | — | Use this PAT for the github MCP server instead of reading 1Password |
 | `OPENCODE_LITELLM_BASE_URL` | `https://litellm.ai.apro.is/v1` | Gateway to talk to |
 | `OPENCODE_LITELLM_PROVIDER_ID` | `litellm` | Provider key in your config |
 | `OPENCODE_LITELLM_HEADER_NAME` | `x-github-repo` | Outgoing header name |
-| `OPENCODE_LITELLM_MCP` | unset | Set to `0` to manage MCP servers yourself |
+
+## MCP servers
+
+The plugin registers none. Add the ones you want:
+
+```bash
+opencode mcp add
+```
 
 ## Verify
 
 ```bash
 opencode models --provider litellm   # the live chat models, no hand-maintained list
-opencode mcp list                    # MCP servers and their connection state
 ```
 
 Avoid `opencode debug config` for this: it dumps the fully resolved config, including the API key and the GitHub PAT, with no redaction — don't paste its output into Slack or an issue.

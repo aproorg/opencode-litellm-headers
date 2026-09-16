@@ -16,41 +16,6 @@ export const BASE_URL = "https://litellm.ai.apro.is/v1"
 
 export const OP_ACCOUNT = "aproorg.1password.eu"
 export const OP_API_KEY_REF = "op://Employee/ai.apro.is litellm/API Key"
-export const OP_GITHUB_PAT_REF = "op://Employee/Claude Code Github PAT/PAT"
-
 // First id present in the synced model list wins.
 export const PREFERRED_MODELS = ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]
 export const PREFERRED_SMALL_MODELS = ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]
-
-// npx/bunx and uvx are optional: servers whose runner is missing are skipped, not registered broken.
-export function resolveRunners(which) {
-  const js = which("npx") ? ["npx", "-y"] : which("bunx") ? ["bunx"] : undefined
-  return { js, uvx: which("uvx") ? ["uvx"] : undefined }
-}
-
-export function defaultMcp({ githubPat, home, runners }) {
-  const mcp = {}
-
-  if (runners.js) {
-    mcp.memory = { type: "local", command: [...runners.js, "@modelcontextprotocol/server-memory"] }
-    mcp.sequentialthinking = { type: "local", command: [...runners.js, "@modelcontextprotocol/server-sequential-thinking"] }
-    mcp.filesystem = { type: "local", command: [...runners.js, "@modelcontextprotocol/server-filesystem", home] }
-  }
-
-  if (runners.uvx) {
-    mcp.fetch = { type: "local", command: [...runners.uvx, "mcp-server-fetch"] }
-    mcp.time = { type: "local", command: [...runners.uvx, "mcp-server-time"] }
-    mcp.git = { type: "local", command: [...runners.uvx, "mcp-server-git"] }
-  }
-
-  if (githubPat) {
-    mcp.github = {
-      type: "remote",
-      url: "https://api.githubcopilot.com/mcp/",
-      oauth: false,
-      headers: { Authorization: `Bearer ${githubPat}` },
-    }
-  }
-
-  return mcp
-}
