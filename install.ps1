@@ -30,10 +30,12 @@ Write-Host "opencode $(opencode --version) at $((Get-Command opencode).Source)"
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
 
 # opencode.json is the file we manage; config.json and opencode.jsonc also load and would override it.
+$stamp = Get-Date -Format yyyyMMddHHmmss
+
 foreach ($other in @("opencode.jsonc", "config.json")) {
   $otherPath = Join-Path $ConfigDir $other
   if (Test-Path $otherPath) {
-    $moved = "$otherPath.bak-$(Get-Date -Format yyyyMMddHHmmss)"
+    $moved = "$otherPath.bak-$stamp"
     Move-Item $otherPath $moved
     Write-Host "Moved $other aside - it overrides opencode.json. Old settings: $moved"
   }
@@ -41,9 +43,16 @@ foreach ($other in @("opencode.jsonc", "config.json")) {
 
 $config = [ordered]@{}
 if (Test-Path $ConfigPath) {
-  Copy-Item $ConfigPath "$ConfigPath.bak-$(Get-Date -Format yyyyMMddHHmmss)"
-  $parsed = Get-Content $ConfigPath -Raw | ConvertFrom-Json
-  foreach ($property in $parsed.PSObject.Properties) { $config[$property.Name] = $property.Value }
+  Copy-Item $ConfigPath "$ConfigPath.bak-$stamp"
+  try {
+    $parsed = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+    foreach ($property in $parsed.PSObject.Properties) { $config[$property.Name] = $property.Value }
+  } catch {
+    Move-Item $ConfigPath "$ConfigPath.unparsed-$stamp"
+    Write-Host "opencode.json has comments or trailing commas and cannot be edited safely."
+    Write-Host "Kept as $ConfigPath.unparsed-$stamp - merge anything you need back by hand."
+    $config = [ordered]@{}
+  }
 }
 
 $managed = @("provider", "model", "small_model", "mcp") | Where-Object { $config.Contains($_) }
