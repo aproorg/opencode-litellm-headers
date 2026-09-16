@@ -59,7 +59,7 @@ Anything you define yourself wins: the plugin only fills in keys that are absent
 
 ## MCP servers
 
-The plugin registers none. OpenCode ships `bash`, `read`, `write`, `edit`, `glob`, `grep` and `webfetch`, which covers what most MCP servers would add — `git`, `gh` and `date` are a bash call away. Add whatever you actually want yourself:
+The plugin registers none. Add the ones you want:
 
 ```bash
 opencode mcp add
