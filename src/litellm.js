@@ -61,6 +61,13 @@ function fromGroupInfo(body) {
       },
     }
 
+    // The picker's effort options: opencode hardcodes low/medium/high for
+    // openai-compatible providers unless the model declares its own.
+    const efforts = Array.isArray(group.supported_reasoning_efforts) ? group.supported_reasoning_efforts : []
+    if (efforts.length) {
+      entry.variants = Object.fromEntries(efforts.map((effort) => [effort, { reasoningEffort: effort }]))
+    }
+
     const input = positive(group.input_cost_per_token)
     const output = positive(group.output_cost_per_token)
     if (input || output) entry.cost = { input: (input ?? 0) * 1e6, output: (output ?? 0) * 1e6 }
