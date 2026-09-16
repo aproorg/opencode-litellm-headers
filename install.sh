@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PLUGIN="${OPENCODE_LITELLM_PLUGIN_SPEC:-@aproorg/opencode-litellm-headers@git+https://github.com/aproorg/opencode-litellm-headers.git}"
-# Not OPENCODE_CONFIG_DIR: other tooling sets that, and we would write into its config.
+REPO="aproorg/opencode-litellm-headers"
+REF="${OPENCODE_LITELLM_REF:-main}"
+PLUGIN_HOME="${OPENCODE_LITELLM_HOME:-$HOME/.local/share/apro-opencode}"
 CONFIG_DIR="${OPENCODE_LITELLM_CONFIG_DIR:-$HOME/.config/opencode}"
 CONFIG="$CONFIG_DIR/opencode.json"
+CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 TS=$(date +%Y%m%d%H%M%S)
 
 say() { printf '%s\n' "$*"; }
@@ -26,6 +28,22 @@ if ! command -v opencode >/dev/null 2>&1; then
 fi
 say "opencode $(opencode --version 2>/dev/null || echo '?') at $(command -v opencode)"
 
+# 2. the plugin itself, as files we own — rerunning this script is the update path
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+say "Downloading plugin ($REF)..."
+curl -fsSL "https://codeload.github.com/$REPO/tar.gz/$REF" | tar -xzf - -C "$TMP" || fail "could not download $REPO at $REF"
+SRC=$(find "$TMP" -maxdepth 2 -type d -name src | head -1)
+[ -n "$SRC" ] || fail "downloaded archive has no src directory"
+
+SHA=$(curl -fsSL "https://api.github.com/repos/$REPO/commits/$REF" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"][:7])' 2>/dev/null || echo unknown)
+mkdir -p "$(dirname "$PLUGIN_HOME")"
+rm -rf "$PLUGIN_HOME"
+mv "$SRC" "$PLUGIN_HOME"
+printf '%s %s\n' "$REF" "$SHA" > "$PLUGIN_HOME/VERSION"
+say "Installed plugin $REF ($SHA) to $PLUGIN_HOME"
+
+# 3. config
 mkdir -p "$CONFIG_DIR"
 
 # opencode.json is the file we manage; config.json and opencode.jsonc also load and would override it.
@@ -36,7 +54,7 @@ for other in "$CONFIG_DIR/opencode.jsonc" "$CONFIG_DIR/config.json"; do
   fi
 done
 
-# 2. back up before touching anything, and never edit a file we cannot parse
+# Back up before touching anything, and never edit a file we cannot parse.
 if [ -f "$CONFIG" ]; then
   cp "$CONFIG" "$CONFIG.bak-$TS"
   if ! python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CONFIG" 2>/dev/null; then
@@ -65,12 +83,12 @@ fi
 python3 -c '
 import json, sys
 
-path, plugin, strip = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
+path, entry, strip = sys.argv[1], sys.argv[2], sys.argv[3] == "1"
 config = json.load(open(path))
 
 config.setdefault("$schema", "https://opencode.ai/config.json")
-plugins = [p for p in config.get("plugin", []) if "opencode-litellm-headers" not in str(p)]
-config["plugin"] = plugins + [plugin]
+plugins = [p for p in config.get("plugin", []) if "opencode-litellm-headers" not in str(p) and "apro-opencode" not in str(p)]
+config["plugin"] = plugins + [entry]
 
 if strip:
     for key in ("provider", "model", "small_model", "mcp"):
@@ -78,25 +96,21 @@ if strip:
 
 json.dump(config, open(path, "w"), indent=2)
 open(path, "a").write("\n")
-' "$CONFIG" "$PLUGIN" "$STRIP"
+' "$CONFIG" "file://$PLUGIN_HOME/index.js" "$STRIP"
 say "Wrote $CONFIG"
 
-# 3. optional runtimes for the local MCP servers
-if ! command -v npx >/dev/null 2>&1 && ! command -v bunx >/dev/null 2>&1; then
-  say "Note: no npx or bunx found — the local MCP servers are skipped. Models and chat work regardless."
-fi
-if ! command -v uvx >/dev/null 2>&1; then
-  say "Note: no uvx found — the fetch/time/git MCP servers are skipped. Models and chat work regardless."
-fi
+# Earlier versions were installed as a package; leaving that cached would load the plugin twice.
+rm -rf "$CACHE_HOME/opencode/packages/@aproorg"
 
-# 4. first launch: install the plugin, fetch the model list
+# 4. verify
 say ""
-say "Setting up (first run downloads the plugin and syncs models)..."
+say "Syncing models..."
 COUNT=$(opencode models 2>/dev/null | grep -cE "^litellm(/|-)" || true)
 
 say ""
 if [ "$COUNT" -gt 0 ]; then
   say "Done — $COUNT models available. Start with: opencode"
+  say "Run this command again at any time to update."
 else
   say "Setup finished, but no models came back."
   say "Check your LiteLLM key is in 1Password as: op://Employee/ai.apro.is litellm/API Key"
