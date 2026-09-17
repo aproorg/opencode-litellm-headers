@@ -11,6 +11,10 @@ $ConfigDir = if ($env:OPENCODE_LITELLM_CONFIG_DIR) { $env:OPENCODE_LITELLM_CONFI
 $ConfigPath = Join-Path $ConfigDir "opencode.json"
 $cacheHome = if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME } else { Join-Path $HOME ".cache" }
 $OpAccount = "aproorg.1password.eu"
+# Same variable the plugin honours, so the two never disagree about the gateway.
+$LitellmBase = if ($env:OPENCODE_LITELLM_BASE_URL) { $env:OPENCODE_LITELLM_BASE_URL } else { "https://litellm.ai.apro.is/v1" }
+$LitellmRoot = $LitellmBase -replace '/v1$', ''
+$OpencodeLog = Join-Path $HOME ".local\share\opencode\log\opencode.log"
 $DefaultOpRef = "op://Employee/ai.apro.is litellm/API Key"
 # The config hook this plugin needs does not exist in older opencode.
 $MinOpencode = [version]"1.18.0"
@@ -242,24 +246,56 @@ if ($models.Count -gt 0) {
   Write-Host "Done - $($models.Count) models available. Start with: opencode"
   Write-Host "Run this command again at any time to update."
 } else {
-  Write-Host "Setup finished, but no models came back."
+  Write-Host "No models came back. Here is exactly what failed:"
   Write-Host ""
 
-  # Say which of the two it is, rather than handing over a checklist.
   if (-not (Have "op")) {
-    Write-Host "The 1Password CLI (op) is not installed, and that is where the LiteLLM key comes from."
-    Write-Host "Install it from https://1password.com/downloads/command-line/ then run this command again."
+    Write-Host "  The 1Password CLI (op) is not installed, and that is where the key comes from."
+    Write-Host "  Install it: https://1password.com/downloads/command-line/"
   } else {
-    $probe = & op --account $OpAccount read $OpKeyRef 2>&1
+    $probe = $null | & op --account $OpAccount read $OpKeyRef 2>&1
     if ($LASTEXITCODE -eq 0 -and $probe) {
-      Write-Host "1Password gave us the key, so the problem is the gateway or the plugin, not your setup."
-      Write-Host "Send this output to the team."
+      try {
+        $response = Invoke-WebRequest -Uri "$LitellmRoot/model_group/info" -Headers @{ Authorization = "Bearer $probe" } -TimeoutSec 15 -UseBasicParsing
+        $code = $response.StatusCode
+        $body = ""
+      } catch {
+        $code = if ($_.Exception.Response) { [int]$_.Exception.Response.StatusCode } else { 0 }
+        $body = if ($_.ErrorDetails) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+      }
+      if ($code -eq 200) {
+        Write-Host "  1Password: ok"
+        Write-Host "  Gateway:   ok (HTTP 200)"
+        Write-Host ""
+        Write-Host "  Both work, so this is the plugin itself. Send this output to the team."
+      } else {
+        Write-Host "  1Password: ok - your key was read fine."
+        Write-Host "  Gateway:   REJECTED IT - HTTP $code from $LitellmRoot"
+        Write-Host ""
+        Write-Host "  What the gateway said:"
+        ($body -split "`n" | Select-Object -First 6) | ForEach-Object { Write-Host "    $_" }
+        Write-Host ""
+        if ($code -eq 429) { Write-Host "  429 means your key is rate limited or over its budget. Ask the team to check it in LiteLLM." }
+        if ($code -eq 401 -or $code -eq 403) { Write-Host "  $code means the key is not valid for this gateway. Ask the team to reissue it." }
+      }
     } else {
-      Write-Host "1Password could not give us the key:"
-      Write-Host "  $probe"
+      Write-Host "  1Password: FAILED - it could not give us the key."
       Write-Host ""
-      Write-Host "In the 1Password app: Settings > Developer > Integrate with 1Password CLI,"
-      Write-Host "then check you can open this item: $OpKeyRef"
+      Write-Host "  What op said:"
+      ($probe -split "`n" | Select-Object -First 6) | ForEach-Object { Write-Host "    $_" }
+      Write-Host ""
+      Write-Host "  Reference used: $OpKeyRef"
+      Write-Host "  In the 1Password app: Settings > Developer > Integrate with 1Password CLI"
+    }
+  }
+
+  # The plugin logs the same failures; show them so nobody has to go hunting.
+  if (Test-Path $OpencodeLog) {
+    $logLines = @(Select-String -Path $OpencodeLog -Pattern "LiteLLM|1Password" | Select-Object -Last 3)
+    if ($logLines.Count -gt 0) {
+      Write-Host ""
+      Write-Host "  From opencode's own log:"
+      $logLines | ForEach-Object { Write-Host "    $($_.Line)" }
     }
   }
 
