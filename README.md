@@ -50,7 +50,7 @@ The config it writes is one entry:
 | Grouping | `claude-*` under **Anthropic**, `gemini-*` under **Google**, `gpt-*` under **OpenAI**, everything else under **LiteLLM** |
 | Defaults | `model` and `small_model` set to the first available of a preferred list |
 | Headers | `x-github-repo: <org>/<repo>`, resolved per request from the active directory's git remote |
-| OpenCode Zen | Disabled, since its models are not served by the gateway. Set `disabled_providers` yourself to keep it |
+| Other providers | `enabled_providers` is set to the four above, so only gateway models exist. Any provider key in your environment — `OPENAI_API_KEY`, `MISTRAL_API_KEY` — otherwise activates OpenCode's own provider for it, whose models bypass LiteLLM. Set `enabled_providers` yourself to override |
 
 Anything you define yourself wins: the plugin only fills in keys that are absent, so a model or provider option in your own `opencode.json` is never overwritten.
 
