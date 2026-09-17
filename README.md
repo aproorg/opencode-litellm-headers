@@ -22,6 +22,8 @@ irm https://raw.githubusercontent.com/aproorg/opencode-litellm-headers/main/inst
 
 It installs OpenCode if missing, downloads the plugin to `~/.local/share/apro-opencode/`, records the version in a `VERSION` file beside it, points `~/.config/opencode/opencode.json` at it, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models.
 
+It asks which 1Password item holds your LiteLLM key, since it is not in the same vault for everyone. Press enter to accept the default, or paste the reference straight from 1Password's **Copy Secret Reference** button. Your answer is stored in `~/.config/opencode-apro/local.env` (`%APPDATA%\opencode-apro\local.env` on Windows) and becomes the default next time, so updating never re-asks blind.
+
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `OPENCODE_LITELLM_REF` | `main` | Branch, tag or commit to install — use it to pin or roll back |
@@ -41,7 +43,7 @@ The config it writes is one entry:
 
 | Area | Behaviour |
 | --- | --- |
-| API key | `op read "op://Employee/ai.apro.is litellm/API Key"`, cached 12h in `~/.cache/opencode-apro/secrets.json` (mode 0600) |
+| API key | `op read` against the reference you chose at install (default `op://Employee/ai.apro.is litellm/API Key`), cached 12h in `~/.cache/opencode-apro/secrets.json` (mode 0600) |
 | Provider | `litellm` plus `litellm-anthropic`, `litellm-google`, `litellm-openai` → `@ai-sdk/openai-compatible` against `https://litellm.ai.apro.is/v1` |
 | Models | `GET /model_group/info`, minus anything declaring a non-chat mode, with context/output limits, per-million costs and capabilities. Cached 6h |
 | Reasoning effort | Each model's effort options come from the gateway's `supported_reasoning_efforts`, instead of OpenCode's hardcoded low/medium/high |
@@ -57,6 +59,7 @@ Anything you define yourself wins: the plugin only fills in keys that are absent
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `LITELLM_API_KEY` | — | Use this key instead of reading 1Password |
+| `OPENCODE_LITELLM_OP_REF` | from `local.env` | 1Password reference to read the key from |
 | `OPENCODE_LITELLM_BASE_URL` | `https://litellm.ai.apro.is/v1` | Gateway to talk to |
 | `OPENCODE_LITELLM_PROVIDER_ID` | `litellm` | Provider key in your config |
 | `OPENCODE_LITELLM_HEADER_NAME` | `x-github-repo` | Outgoing header name |

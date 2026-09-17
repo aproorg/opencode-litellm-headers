@@ -14,6 +14,7 @@ import {
 import { discoverModels } from "./litellm.js"
 import { createRepoResolver } from "./repo.js"
 import { createSecretReader } from "./secrets.js"
+import { readSettings } from "./settings.js"
 
 function envValue(name) {
   const value = process.env[name]
@@ -52,7 +53,9 @@ export default async ({ $, client, worktree, directory }) => {
 
   return {
     async config(config) {
-      const apiKey = envValue("LITELLM_API_KEY") ?? (await secrets.read(OP_API_KEY_REF, { required: true }))
+      const settings = await readSettings()
+      const keyRef = envValue("OPENCODE_LITELLM_OP_REF") ?? settings.OP_API_KEY_REF ?? OP_API_KEY_REF
+      const apiKey = envValue("LITELLM_API_KEY") ?? (await secrets.read(keyRef, { required: true }))
       await secrets.flush()
 
       config.provider ??= {}
