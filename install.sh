@@ -11,6 +11,8 @@ APRO_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode-apro"
 LOCAL_ENV="$APRO_CONFIG_DIR/local.env"
 OP_ACCOUNT="aproorg.1password.eu"
 DEFAULT_OP_REF="op://Employee/ai.apro.is litellm/API Key"
+# The config hook this plugin needs does not exist in older opencode.
+MIN_OPENCODE="1.18.0"
 TS=$(date +%Y%m%d%H%M%S)
 
 say() { printf '%s\n' "$*"; }
@@ -45,13 +47,38 @@ read_existing() {
   sed -nE 's/^'"$1"'="(.*)"$/\1/p' "$LOCAL_ENV" | head -1
 }
 
-# 1. opencode itself
+version_lt() {
+  [ "$1" = "$2" ] && return 1
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]
+}
+
+opencode_version() { opencode --version 2>/dev/null | tr -d '\r' | head -1; }
+
+# 1. opencode itself, new enough to have the plugin config hook
 if ! command -v opencode >/dev/null 2>&1; then
   command -v brew >/dev/null 2>&1 || fail "opencode is not installed and Homebrew is missing. See https://brew.sh then rerun."
   say "Installing opencode..."
   brew install anomalyco/tap/opencode
 fi
-say "opencode $(opencode --version 2>/dev/null || echo '?') at $(command -v opencode)"
+
+OC_VERSION=$(opencode_version)
+if [ -z "$OC_VERSION" ] || version_lt "${OC_VERSION%%-*}" "$MIN_OPENCODE"; then
+  say "opencode ${OC_VERSION:-unknown} is too old for this plugin (needs $MIN_OPENCODE or newer). Upgrading..."
+  if command -v brew >/dev/null 2>&1 && brew list anomalyco/tap/opencode >/dev/null 2>&1; then
+    brew upgrade anomalyco/tap/opencode || true
+  elif command -v npm >/dev/null 2>&1 && npm ls -g opencode-ai >/dev/null 2>&1; then
+    npm install -g opencode-ai@latest
+  elif command -v brew >/dev/null 2>&1; then
+    brew install anomalyco/tap/opencode || true
+  else
+    fail "cannot upgrade opencode automatically — upgrade it yourself, then rerun."
+  fi
+  OC_VERSION=$(opencode_version)
+  if [ -z "$OC_VERSION" ] || version_lt "${OC_VERSION%%-*}" "$MIN_OPENCODE"; then
+    fail "opencode is still ${OC_VERSION:-unknown} after upgrading, and this plugin needs $MIN_OPENCODE or newer."
+  fi
+fi
+say "opencode $OC_VERSION at $(command -v opencode)"
 
 # 2. the plugin itself, as files we own — rerunning this script is the update path
 TMP=$(mktemp -d)
