@@ -12,6 +12,8 @@ $ConfigPath = Join-Path $ConfigDir "opencode.json"
 $cacheHome = if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME } else { Join-Path $HOME ".cache" }
 $OpAccount = "aproorg.1password.eu"
 $DefaultOpRef = "op://Employee/ai.apro.is litellm/API Key"
+# The config hook this plugin needs does not exist in older opencode.
+$MinOpencode = [version]"1.18.0"
 $AproConfigDir = if ($env:APPDATA) { Join-Path $env:APPDATA "opencode-apro" } else { Join-Path $HOME ".config\opencode-apro" }
 $LocalEnv = Join-Path $AproConfigDir "local.env"
 $stamp = Get-Date -Format yyyyMMddHHmmss
@@ -67,7 +69,13 @@ function Get-ConfigProblem($path) {
   return $null
 }
 
-# 1. opencode itself
+function Get-OpencodeVersion {
+  $raw = & opencode --version 2>$null | Select-Object -First 1
+  if (-not $raw) { return $null }
+  try { return [version](($raw -replace '[^0-9.].*$', '').Trim()) } catch { return $null }
+}
+
+# 1. opencode itself, new enough to have the plugin config hook
 if (-not (Have "opencode")) {
   Write-Host "Installing opencode..."
   if (Have "scoop") { scoop install opencode }
@@ -75,7 +83,23 @@ if (-not (Have "opencode")) {
   elseif (Have "npm") { npm install -g opencode-ai@latest }
   else { throw "Install a package manager first (scoop.sh or chocolatey.org), then rerun. See https://opencode.ai" }
 }
-Write-Host "opencode $(opencode --version) at $((Get-Command opencode).Source)"
+
+$ocVersion = Get-OpencodeVersion
+if (-not $ocVersion -or $ocVersion -lt $MinOpencode) {
+  $shown = if ($ocVersion) { $ocVersion } else { "unknown" }
+  Write-Host "opencode $shown is too old for this plugin (needs $MinOpencode or newer). Upgrading..."
+  if (Have "scoop") { scoop update opencode }
+  elseif (Have "choco") { choco upgrade opencode -y }
+  elseif (Have "npm") { npm install -g opencode-ai@latest }
+  else { throw "cannot upgrade opencode automatically - upgrade it yourself, then rerun." }
+
+  $ocVersion = Get-OpencodeVersion
+  if (-not $ocVersion -or $ocVersion -lt $MinOpencode) {
+    $shown = if ($ocVersion) { $ocVersion } else { "unknown" }
+    throw "opencode is still $shown after upgrading, and this plugin needs $MinOpencode or newer."
+  }
+}
+Write-Host "opencode $ocVersion at $((Get-Command opencode).Source)"
 
 # 2. the plugin itself, as files we own - rerunning this script is the update path
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("apro-opencode-" + [guid]::NewGuid().ToString("N"))

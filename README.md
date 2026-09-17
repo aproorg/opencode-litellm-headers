@@ -20,7 +20,7 @@ irm https://raw.githubusercontent.com/aproorg/opencode-litellm-headers/main/inst
 
 **Run the same command again to update.** The installer owns the plugin files, so rerunning replaces them with the current version — there is no package cache to invalidate.
 
-It installs OpenCode if missing, downloads the plugin to `~/.local/share/apro-opencode/`, records the version in a `VERSION` file beside it, points `~/.config/opencode/opencode.json` at it, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models.
+It installs OpenCode if missing — or upgrades it if it predates 1.18.0, which is where the plugin config hook this relies on arrived — downloads the plugin to `~/.local/share/apro-opencode/`, records the version in a `VERSION` file beside it, points `~/.config/opencode/opencode.json` at it, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models.
 
 It asks which 1Password item holds your LiteLLM key, since it is not in the same vault for everyone. Press enter to accept the default, or paste the reference straight from 1Password's **Copy Secret Reference** button. Your answer is stored in `~/.config/opencode-apro/local.env` (`%APPDATA%\opencode-apro\local.env` on Windows) and becomes the default next time, so updating never re-asks blind.
 
