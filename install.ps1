@@ -10,6 +10,8 @@ $PluginHome = if ($env:OPENCODE_LITELLM_HOME) { $env:OPENCODE_LITELLM_HOME } els
 $ConfigDir = if ($env:OPENCODE_LITELLM_CONFIG_DIR) { $env:OPENCODE_LITELLM_CONFIG_DIR } else { Join-Path $HOME ".config\opencode" }
 $ConfigPath = Join-Path $ConfigDir "opencode.json"
 $cacheHome = if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME } else { Join-Path $HOME ".cache" }
+$OpAccount = "aproorg.1password.eu"
+$OpKeyRef = "op://Employee/ai.apro.is litellm/API Key"
 $stamp = Get-Date -Format yyyyMMddHHmmss
 
 function Have($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
@@ -162,12 +164,34 @@ if ($models.Count -gt 0) {
   Write-Host "Run this command again at any time to update."
 } else {
   Write-Host "Setup finished, but no models came back."
-  Write-Host "Check your LiteLLM key is in 1Password as: op://Employee/ai.apro.is litellm/API Key"
-  Write-Host "Then run: op signin --account aproorg.1password.eu; opencode models"
+  Write-Host ""
+
+  # Say which of the two it is, rather than handing over a checklist.
+  if (-not (Have "op")) {
+    Write-Host "The 1Password CLI (op) is not installed, and that is where the LiteLLM key comes from."
+    Write-Host "Install it from https://1password.com/downloads/command-line/ then run this command again."
+  } else {
+    $probe = & op --account $OpAccount read $OpKeyRef 2>&1
+    if ($LASTEXITCODE -eq 0 -and $probe) {
+      Write-Host "1Password gave us the key, so the problem is the gateway or the plugin, not your setup."
+      Write-Host "Send this output to the team."
+    } else {
+      Write-Host "1Password could not give us the key:"
+      Write-Host "  $probe"
+      Write-Host ""
+      Write-Host "In the 1Password app: Settings > Developer > Integrate with 1Password CLI,"
+      Write-Host "then check you can open this item: $OpKeyRef"
+    }
+  }
+
   if ($output.Count -gt 0) {
     Write-Host ""
     Write-Host "opencode said:"
     $output | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
   }
-  exit 1
+
+  # Not exit: this script is run through `irm ... | iex`, where exit closes the user's terminal
+  # and takes everything above with it.
+  Write-Host ""
+  throw "opencode returned no LiteLLM models."
 }
