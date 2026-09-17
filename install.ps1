@@ -20,6 +20,27 @@ function Ask($question) {
   return $reply -match '^[Yy]'
 }
 
+# Windows PowerShell 5.1 writes a BOM for -Encoding UTF8, and other encodings write UTF-16.
+# opencode parses this file as JSON(C) and rejects both, so write the bytes ourselves.
+function Write-Utf8NoBom($path, $text) {
+  [System.IO.File]::WriteAllText($path, $text, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+# Returns a reason the file is unusable, or $null when it parses.
+function Get-ConfigProblem($path) {
+  if (-not (Test-Path $path)) { return "it was not created" }
+  $bytes = [System.IO.File]::ReadAllBytes($path)
+  if ($bytes.Length -eq 0) { return "it is empty" }
+  if ($bytes[0] -ne 0x7B) {
+    $head = (($bytes | Select-Object -First 4 | ForEach-Object { $_.ToString("x2") }) -join " ")
+    return "it does not start with '{' (first bytes: $head)"
+  }
+  # UTF-16LE also starts with 7b; the NUL after it is the giveaway.
+  if ($bytes.Length -gt 1 -and $bytes[1] -eq 0x00) { return "it is UTF-16 encoded, not UTF-8" }
+  try { [System.IO.File]::ReadAllText($path) | ConvertFrom-Json | Out-Null } catch { return "it is not valid JSON: $($_.Exception.Message)" }
+  return $null
+}
+
 # 1. opencode itself
 if (-not (Have "opencode")) {
   Write-Host "Installing opencode..."
@@ -50,9 +71,13 @@ try {
   } catch { }
 
   New-Item -ItemType Directory -Force -Path (Split-Path $PluginHome -Parent) | Out-Null
-  if (Test-Path $PluginHome) { Remove-Item -Recurse -Force $PluginHome }
+  if (Test-Path $PluginHome) {
+    # Windows locks files an open opencode is using; POSIX does not.
+    try { Remove-Item -Recurse -Force $PluginHome }
+    catch { throw "could not replace $PluginHome - close any running opencode, then rerun. ($($_.Exception.Message))" }
+  }
   Move-Item $src.FullName $PluginHome
-  Set-Content -Path (Join-Path $PluginHome "VERSION") -Value "$Ref $sha" -Encoding UTF8
+  Write-Utf8NoBom (Join-Path $PluginHome "VERSION") "$Ref $sha"
   Write-Host "Installed plugin $Ref ($sha) to $PluginHome"
 } finally {
   Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
@@ -102,7 +127,18 @@ $entry = "file:///" + ($PluginHome -replace '\\', '/').TrimStart('/') + "/index.
 $plugins = @($config["plugin"]) | Where-Object { $_ -and ($_ -notlike "*opencode-litellm-headers*") -and ($_ -notlike "*apro-opencode*") }
 $config["plugin"] = @($plugins) + @($entry)
 
-ConvertTo-Json $config -Depth 20 | Set-Content $ConfigPath -Encoding UTF8
+$json = ConvertTo-Json $config -Depth 20
+if ([string]::IsNullOrWhiteSpace($json)) { $json = "" } else { Write-Utf8NoBom $ConfigPath $json }
+
+# Never leave a config opencode cannot read: fall back to the one entry the plugin needs.
+$problem = if ($json) { Get-ConfigProblem $ConfigPath } else { "it could not be serialised" }
+if ($problem) {
+  Write-Host "Merging your existing settings produced a config opencode cannot read - $problem"
+  Write-Host "Writing a minimal config instead; your old one is kept as $ConfigPath.bak-$stamp"
+  Write-Utf8NoBom $ConfigPath ('{"$schema":"https://opencode.ai/config.json","plugin":["' + $entry + '"]}')
+  $problem = Get-ConfigProblem $ConfigPath
+  if ($problem) { throw "could not write a usable $ConfigPath - $problem" }
+}
 Write-Host "Wrote $ConfigPath"
 
 # Earlier versions were installed as a package; leaving that cached would load the plugin twice.
@@ -112,7 +148,13 @@ if (Test-Path $pluginCache) { Remove-Item -Recurse -Force $pluginCache }
 # 4. verify
 Write-Host ""
 Write-Host "Syncing models..."
-$models = @(opencode models 2>$null | Where-Object { $_ -match "^litellm(/|-)" })
+# $ErrorActionPreference is Stop, and anything opencode writes to stderr would abort the
+# script with a raw node trace instead of the diagnosis below.
+$previous = $ErrorActionPreference
+$ErrorActionPreference = "Continue"
+$output = @(& opencode models 2>&1 | ForEach-Object { $_.ToString() })
+$ErrorActionPreference = $previous
+$models = @($output | Where-Object { $_ -match "^litellm(/|-)" })
 
 Write-Host ""
 if ($models.Count -gt 0) {
@@ -122,5 +164,10 @@ if ($models.Count -gt 0) {
   Write-Host "Setup finished, but no models came back."
   Write-Host "Check your LiteLLM key is in 1Password as: op://Employee/ai.apro.is litellm/API Key"
   Write-Host "Then run: op signin --account aproorg.1password.eu; opencode models"
+  if ($output.Count -gt 0) {
+    Write-Host ""
+    Write-Host "opencode said:"
+    $output | Select-Object -First 10 | ForEach-Object { Write-Host "  $_" }
+  }
   exit 1
 }
