@@ -58,7 +58,6 @@ Anything you define yourself wins: the plugin only fills in keys that are absent
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LITELLM_API_KEY` | — | Use this key instead of reading 1Password |
 | `OPENCODE_LITELLM_OP_REF` | from `local.env` | 1Password reference to read the key from |
 | `OPENCODE_LITELLM_BASE_URL` | `https://litellm.ai.apro.is/v1` | Gateway to talk to |
 | `OPENCODE_LITELLM_PROVIDER_ID` | `litellm` | Provider key in your config |
@@ -90,7 +89,7 @@ rm -rf ~/.cache/opencode-apro
 
 The installer handles it: it replaces any earlier plugin entry, offers to remove the `provider`, `model`, `small_model` and `mcp` blocks the plugin now manages, and keeps a timestamped backup of your config. Stale model ids left in that file keep showing in the picker, because your own config takes precedence.
 
-One thing it does not touch: delete `~/bin/opencode` yourself if you still have the wrapper that exported `LITELLM_API_KEY` and `OPENCODE_GITHUB_REPO`.
+One thing it does not touch: delete `~/bin/opencode` yourself if you still have the wrapper, and remove any `LITELLM_API_KEY` export it left in your shell profile. The key comes from 1Password and nowhere else, so a leftover export is dead weight — and before this was enforced, a stale one silently replaced the real key and every request failed at the gateway.
 
 ## How it works
 
@@ -111,7 +110,7 @@ Test against an isolated config without touching your own. Isolate with `HOME`, 
 mkdir -p /tmp/octest/.config/opencode
 printf '{"$schema":"https://opencode.ai/config.json","plugin":["file://%s/src/index.js"]}\n' "$PWD" \
   > /tmp/octest/.config/opencode/opencode.json
-HOME=/tmp/octest LITELLM_API_KEY=... opencode models
+HOME=/tmp/octest opencode models   # reads your real 1Password item
 ```
 
 Plain JavaScript, no build step.

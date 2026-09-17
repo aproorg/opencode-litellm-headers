@@ -55,7 +55,9 @@ export default async ({ $, client, worktree, directory }) => {
     async config(config) {
       const settings = await readSettings()
       const keyRef = envValue("OPENCODE_LITELLM_OP_REF") ?? settings.OP_API_KEY_REF ?? OP_API_KEY_REF
-      const apiKey = envValue("LITELLM_API_KEY") ?? (await secrets.read(keyRef, { required: true }))
+      // 1Password is the only source. A stale LITELLM_API_KEY left in a shell profile
+      // by the old wrapper otherwise replaces the real key and every request 401s.
+      const apiKey = await secrets.read(keyRef, { required: true })
       await secrets.flush()
 
       config.provider ??= {}
@@ -64,7 +66,6 @@ export default async ({ $, client, worktree, directory }) => {
         const provider = (config.provider[id] ??= {})
         provider.name ??= name
         provider.npm ??= PROVIDER_NPM
-        provider.env ??= ["LITELLM_API_KEY"]
         provider.options ??= {}
         provider.options.baseURL ??= baseURL
         if (apiKey && provider.options.apiKey === undefined) provider.options.apiKey = apiKey
