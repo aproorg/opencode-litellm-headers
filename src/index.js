@@ -88,7 +88,9 @@ export default async ({ $, client, worktree, directory }) => {
       if (count) await log("info", `Synced ${count} LiteLLM chat models.`, { provider: providerId })
       else await warn("No LiteLLM models discovered; keeping configured models.", { provider: providerId })
 
-      // OpenCode Zen ships enabled and its models are not ours to offer.
+      // Only the gateway: any provider key in the environment otherwise activates
+      // opencode's own provider for it, whose models bypass LiteLLM entirely.
+      config.enabled_providers ??= [...ourProviderIds]
       config.disabled_providers ??= ["opencode"]
 
       config.model ??= firstAvailable(PREFERRED_MODELS, placed)
