@@ -11,10 +11,34 @@ $ConfigDir = if ($env:OPENCODE_LITELLM_CONFIG_DIR) { $env:OPENCODE_LITELLM_CONFI
 $ConfigPath = Join-Path $ConfigDir "opencode.json"
 $cacheHome = if ($env:XDG_CACHE_HOME) { $env:XDG_CACHE_HOME } else { Join-Path $HOME ".cache" }
 $OpAccount = "aproorg.1password.eu"
-$OpKeyRef = "op://Employee/ai.apro.is litellm/API Key"
+$DefaultOpRef = "op://Employee/ai.apro.is litellm/API Key"
+$AproConfigDir = if ($env:APPDATA) { Join-Path $env:APPDATA "opencode-apro" } else { Join-Path $HOME ".config\opencode-apro" }
+$LocalEnv = Join-Path $AproConfigDir "local.env"
 $stamp = Get-Date -Format yyyyMMddHHmmss
 
 function Have($name) { $null -ne (Get-Command $name -ErrorAction SilentlyContinue) }
+
+# Under `irm ... | iex` the script runs in the user's own session, so Read-Host
+# reaches their terminal; a redirected host (CI) falls through to the default.
+function Prompt-Default($question, $default) {
+  if ([Console]::IsInputRedirected) { return $default }
+  $reply = Read-Host "  $question [$default]"
+  if ([string]::IsNullOrWhiteSpace($reply)) { return $default }
+  $reply = $reply.Trim()
+  # 1Password's "Copy Secret Reference" hands you a quoted string.
+  if (($reply.StartsWith('"') -and $reply.EndsWith('"')) -or ($reply.StartsWith("'") -and $reply.EndsWith("'"))) {
+    $reply = $reply.Substring(1, $reply.Length - 2)
+  }
+  return $reply
+}
+
+function Read-Existing($key) {
+  if (-not (Test-Path $LocalEnv)) { return "" }
+  foreach ($line in Get-Content $LocalEnv) {
+    if ($line -match "^$key=`"(.*)`"$") { return $Matches[1] }
+  }
+  return ""
+}
 
 function Ask($question) {
   if ($env:OPENCODE_ASSUME_YES -eq "1") { return $true }
@@ -85,7 +109,38 @@ try {
   Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
-# 3. config
+# 3. which 1Password item holds the key - not everyone has it in the same vault
+$current = Read-Existing "OP_API_KEY_REF"
+# Stays fixed across retries: offering a rejected answer back as the default is maddening.
+$promptDefault = if ($current) { $current } else { $DefaultOpRef }
+$OpKeyRef = $promptDefault
+if ($env:OPENCODE_ASSUME_YES -ne "1") {
+  Write-Host ""
+  while ($true) {
+    $OpKeyRef = Prompt-Default "1Password secret reference (Copy Secret Reference in 1Password)" $promptDefault
+    if (-not $OpKeyRef.StartsWith("op://")) { Write-Host "  must start with op:// - try again"; continue }
+    $segments = $OpKeyRef.Substring(5) -split "/"
+    if ($segments.Count -lt 3 -or -not $segments[0] -or -not $segments[1]) {
+      Write-Host "  need a full reference like op://Vault/Item/Field - got '$OpKeyRef'"
+      continue
+    }
+    break
+  }
+}
+
+New-Item -ItemType Directory -Force -Path $AproConfigDir | Out-Null
+$kept = @()
+if (Test-Path $LocalEnv) { $kept = @(Get-Content $LocalEnv | Where-Object { $_ -notmatch '^OP_API_KEY_REF=' }) }
+Write-Utf8NoBom $LocalEnv (($kept + @("OP_API_KEY_REF=`"$OpKeyRef`"")) -join "`n")
+
+# Not fatal: 1Password may simply not be signed in yet.
+if (Have "op") {
+  # Empty stdin: op prompts to add an account when it has none, and would eat the terminal.
+  $null | & op --account $OpAccount read $OpKeyRef 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) { Write-Host "  note: could not read that item yet - check it if no models show up below" }
+}
+
+# 4. config
 New-Item -ItemType Directory -Force -Path $ConfigDir | Out-Null
 
 # opencode.json is the file we manage; config.json and opencode.jsonc also load and would override it.
@@ -147,7 +202,7 @@ Write-Host "Wrote $ConfigPath"
 $pluginCache = Join-Path $cacheHome "opencode\packages\@aproorg"
 if (Test-Path $pluginCache) { Remove-Item -Recurse -Force $pluginCache }
 
-# 4. verify
+# 5. verify
 Write-Host ""
 Write-Host "Syncing models..."
 # $ErrorActionPreference is Stop, and anything opencode writes to stderr would abort the

@@ -7,6 +7,10 @@ PLUGIN_HOME="${OPENCODE_LITELLM_HOME:-$HOME/.local/share/apro-opencode}"
 CONFIG_DIR="${OPENCODE_LITELLM_CONFIG_DIR:-$HOME/.config/opencode}"
 CONFIG="$CONFIG_DIR/opencode.json"
 CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+APRO_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode-apro"
+LOCAL_ENV="$APRO_CONFIG_DIR/local.env"
+OP_ACCOUNT="aproorg.1password.eu"
+DEFAULT_OP_REF="op://Employee/ai.apro.is litellm/API Key"
 TS=$(date +%Y%m%d%H%M%S)
 
 say() { printf '%s\n' "$*"; }
@@ -18,6 +22,27 @@ ask() {
   [ -t 0 ] || [ -e /dev/tty ] || return 1
   read -r -p "$prompt [y/N] " reply < /dev/tty || return 1
   [[ "$reply" =~ ^[Yy] ]]
+}
+
+# Prompts go through /dev/tty: under `curl | bash` stdin is the script itself.
+prompt_default() {
+  local question="$1" default="$2" reply=""
+  if { exec 3<>/dev/tty; } 2>/dev/null; then
+    printf '  %s [%s]: ' "$question" "$default" >&3
+    IFS= read -r reply <&3 || reply=""
+    exec 3<&-
+  fi
+  reply="${reply:-$default}"
+  # 1Password's "Copy Secret Reference" hands you a quoted string.
+  case "$reply" in
+    \"*\" | \'*\') reply="${reply:1:${#reply}-2}" ;;
+  esac
+  printf '%s\n' "$reply"
+}
+
+read_existing() {
+  [ -f "$LOCAL_ENV" ] || return 0
+  sed -nE 's/^'"$1"'="(.*)"$/\1/p' "$LOCAL_ENV" | head -1
 }
 
 # 1. opencode itself
@@ -43,7 +68,42 @@ mv "$SRC" "$PLUGIN_HOME"
 printf '%s %s\n' "$REF" "$SHA" > "$PLUGIN_HOME/VERSION"
 say "Installed plugin $REF ($SHA) to $PLUGIN_HOME"
 
-# 3. config
+# 3. which 1Password item holds the key — not everyone has it in the same vault
+CURRENT_OP_REF=$(read_existing OP_API_KEY_REF)
+# Stays fixed across retries: offering a rejected answer back as the default is maddening.
+PROMPT_DEFAULT_REF="${CURRENT_OP_REF:-$DEFAULT_OP_REF}"
+OP_REF="$PROMPT_DEFAULT_REF"
+if [ "${OPENCODE_ASSUME_YES:-0}" != "1" ]; then
+  say ""
+  while :; do
+    OP_REF=$(prompt_default "1Password secret reference (Copy Secret Reference in 1Password)" "$PROMPT_DEFAULT_REF")
+    case "$OP_REF" in
+      op://*) ;;
+      *) say "  must start with op:// — try again"; continue ;;
+    esac
+    REST="${OP_REF#op://}"
+    IFS='/' read -ra SEGS <<< "$REST"
+    if [ "${#SEGS[@]}" -lt 3 ] || [ -z "${SEGS[0]:-}" ] || [ -z "${SEGS[1]:-}" ]; then
+      say "  need a full reference like op://Vault/Item/Field — got '$OP_REF'"
+      continue
+    fi
+    break
+  done
+fi
+
+mkdir -p "$APRO_CONFIG_DIR"
+TMP_ENV=$(mktemp)
+[ -f "$LOCAL_ENV" ] && grep -v '^OP_API_KEY_REF=' "$LOCAL_ENV" > "$TMP_ENV" || true
+printf 'OP_API_KEY_REF="%s"\n' "$OP_REF" >> "$TMP_ENV"
+mv "$TMP_ENV" "$LOCAL_ENV"
+
+# Not fatal: 1Password may simply not be signed in yet.
+# stdin closed: op prompts to add an account when it has none, and would eat the terminal.
+if command -v op >/dev/null 2>&1 && ! op --account "$OP_ACCOUNT" read "$OP_REF" >/dev/null 2>&1 </dev/null; then
+  say "  note: could not read that item yet — check it if no models show up below"
+fi
+
+# 4. config
 mkdir -p "$CONFIG_DIR"
 
 # opencode.json is the file we manage; config.json and opencode.jsonc also load and would override it.
@@ -102,7 +162,7 @@ say "Wrote $CONFIG"
 # Earlier versions were installed as a package; leaving that cached would load the plugin twice.
 rm -rf "$CACHE_HOME/opencode/packages/@aproorg"
 
-# 4. verify
+# 5. verify
 say ""
 say "Syncing models..."
 COUNT=$(opencode models 2>/dev/null | grep -cE "^litellm(/|-)" || true)
