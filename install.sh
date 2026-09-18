@@ -10,6 +10,10 @@ CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
 APRO_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/opencode-apro"
 LOCAL_ENV="$APRO_CONFIG_DIR/local.env"
 OP_ACCOUNT="aproorg.1password.eu"
+# Same variable the plugin honours, so the two never disagree about the gateway.
+LITELLM_BASE="${OPENCODE_LITELLM_BASE_URL:-https://litellm.ai.apro.is/v1}"
+LITELLM_ROOT="${LITELLM_BASE%/v1}"
+OPENCODE_LOG="${XDG_DATA_HOME:-$HOME/.local/share}/opencode/log/opencode.log"
 DEFAULT_OP_REF="op://Employee/ai.apro.is litellm/API Key"
 # The config hook this plugin needs does not exist in older opencode.
 MIN_OPENCODE="1.18.0"
@@ -199,8 +203,53 @@ if [ "$COUNT" -gt 0 ]; then
   say "Done — $COUNT models available. Start with: opencode"
   say "Run this command again at any time to update."
 else
-  say "Setup finished, but no models came back."
-  say "Check your LiteLLM key is in 1Password as: op://Employee/ai.apro.is litellm/API Key"
-  say "Then run: op signin --account aproorg.1password.eu && opencode models"
+  say "No models came back. Here is exactly what failed:"
+  say ""
+
+  if ! command -v op >/dev/null 2>&1; then
+    say "  The 1Password CLI (op) is not installed, and that is where the key comes from."
+    say "  Install it: https://1password.com/downloads/command-line/"
+  else
+    OP_OUT=$(mktemp); OP_ERR=$(mktemp); BODY=$(mktemp)
+    trap 'rm -f "$OP_OUT" "$OP_ERR" "$BODY"' EXIT
+    if op --account "$OP_ACCOUNT" read "$OP_REF" >"$OP_OUT" 2>"$OP_ERR" </dev/null; then
+      CODE=$(curl -s -o "$BODY" -w '%{http_code}' -m 15 \
+        -H "Authorization: Bearer $(cat "$OP_OUT")" "$LITELLM_ROOT/model_group/info" || echo 000)
+      if [ "$CODE" = "200" ]; then
+        say "  1Password: ok"
+        say "  Gateway:   ok (HTTP 200)"
+        say ""
+        say "  Both work, so this is the plugin itself. Send this output to the team."
+      else
+        say "  1Password: ok — your key was read fine."
+        say "  Gateway:   REJECTED IT — HTTP $CODE from $LITELLM_ROOT"
+        say ""
+        say "  What the gateway said:"
+        sed 's/^/    /' "$BODY" | head -6
+        say ""
+        case "$CODE" in
+          429) say "  429 means your key is rate limited or over its budget. Ask the team to check it in LiteLLM." ;;
+          401|403) say "  $CODE means the key is not valid for this gateway. Ask the team to reissue it." ;;
+        esac
+      fi
+    else
+      say "  1Password: FAILED — it could not give us the key."
+      say ""
+      say "  What op said:"
+      sed 's/^/    /' "$OP_ERR" | head -6
+      say ""
+      say "  Reference used: $OP_REF"
+    fi
+  fi
+
+  # The plugin logs the same failures; show them so nobody has to go hunting.
+  if [ -f "$OPENCODE_LOG" ]; then
+    LOG_LINES=$(grep -E "LiteLLM|1Password" "$OPENCODE_LOG" 2>/dev/null | tail -3 || true)
+    if [ -n "$LOG_LINES" ]; then
+      say ""
+      say "  From opencode's own log:"
+      printf '%s\n' "$LOG_LINES" | sed 's/^/    /'
+    fi
+  fi
   exit 1
 fi

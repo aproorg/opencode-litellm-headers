@@ -20,7 +20,12 @@ async function getJson(url, apiKey, timeoutMs) {
       headers: { accept: "application/json", ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}) },
       signal: controller.signal,
     })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    if (!response.ok) {
+      // The body is the whole point: "budget exceeded" and "rate limit" are both 429.
+      const body = await response.text().catch(() => "")
+      const detail = body.trim().replace(/\s+/g, " ").slice(0, 400)
+      throw new Error(`HTTP ${response.status} ${response.statusText}${detail ? ` — ${detail}` : ""}`)
+    }
     return await response.json()
   } finally {
     clearTimeout(timer)
