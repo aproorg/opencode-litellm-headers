@@ -111,6 +111,11 @@ function sorted(models) {
   return Object.fromEntries(Object.entries(models).sort(([a], [b]) => a.localeCompare(b)))
 }
 
+// The cached model list at any age, without a request: V2 setup must not block on the gateway.
+export async function peekModels(baseURL) {
+  return (await readCache(cacheName(baseURL)))?.models ?? {}
+}
+
 export async function discoverModels({ baseURL, apiKey, timeoutMs = TIMEOUT_MS, onWarning } = {}) {
   const name = cacheName(baseURL)
   const cached = await readCache(name)

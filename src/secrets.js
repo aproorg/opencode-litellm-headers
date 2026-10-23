@@ -1,10 +1,11 @@
 import { isFresh, readCache, writeCache } from "./cache.js"
 import { OP_ACCOUNT } from "./defaults.js"
+import { run } from "./exec.js"
 
 const CACHE_FILE = "secrets.json"
 const TTL_MS = 12 * 60 * 60 * 1000
 
-export function createSecretReader($, { onWarning } = {}) {
+export function createSecretReader({ onWarning } = {}) {
   let loading
   let cache
   let dirty = false
@@ -26,7 +27,7 @@ export function createSecretReader($, { onWarning } = {}) {
 
     let value
     try {
-      const result = await $`op --account ${OP_ACCOUNT} read ${ref}`.quiet().nothrow()
+      const result = await run("op", ["--account", OP_ACCOUNT, "read", ref])
       if (result.exitCode === 0) value = String(result.stdout).trim()
       else onWarning?.(`1Password read failed for ${ref}`, { stderr: String(result.stderr).trim().slice(0, 200) })
     } catch (error) {
@@ -44,10 +45,16 @@ export function createSecretReader($, { onWarning } = {}) {
     return value
   }
 
+  // The cached value at any age, without calling op: V2 setup must not block on 1Password.
+  async function peek(ref) {
+    const entries = await load()
+    return entries[ref]?.value || undefined
+  }
+
   async function flush() {
     if (dirty) await writeCache(CACHE_FILE, cache)
     dirty = false
   }
 
-  return { read, flush }
+  return { read, peek, flush }
 }

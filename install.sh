@@ -15,8 +15,8 @@ LITELLM_BASE="${OPENCODE_LITELLM_BASE_URL:-https://litellm.ai.apro.is/v1}"
 LITELLM_ROOT="${LITELLM_BASE%/v1}"
 OPENCODE_LOG="${XDG_DATA_HOME:-$HOME/.local/share}/opencode/log/opencode.log"
 DEFAULT_OP_REF="op://Employee/ai.apro.is litellm/API Key"
-# The config hook this plugin needs does not exist in older opencode.
-MIN_OPENCODE="1.18.0"
+# 1.18.29 is the first V1 that loads the plugin's combined V1/V2 default export.
+MIN_OPENCODE="1.18.29"
 TS=$(date +%Y%m%d%H%M%S)
 
 say() { printf '%s\n' "$*"; }
@@ -56,7 +56,8 @@ version_lt() {
   [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" = "$1" ]
 }
 
-opencode_version() { opencode --version 2>/dev/null | tr -d '\r' | head -1; }
+# V1 prints "1.19.4", V2 prints "opencode v2.1.4": keep only the version number.
+opencode_version() { opencode --version 2>/dev/null | tr -d '\r' | head -1 | sed -E 's/^[^0-9]*//'; }
 
 # 1. opencode itself, new enough to have the plugin config hook
 if ! command -v opencode >/dev/null 2>&1; then
@@ -187,7 +188,7 @@ if strip:
 
 json.dump(config, open(path, "w"), indent=2)
 open(path, "a").write("\n")
-' "$CONFIG" "file://$PLUGIN_HOME/index.js" "$STRIP"
+' "$CONFIG" "file://$PLUGIN_HOME" "$STRIP"
 say "Wrote $CONFIG"
 
 # Earlier versions were installed as a package; leaving that cached would load the plugin twice.
@@ -196,7 +197,18 @@ rm -rf "$CACHE_HOME/opencode/packages/@aproorg"
 # 5. verify
 say ""
 say "Syncing models..."
+# V2 serves every session from a background server that keeps its old config until reloaded.
+# V1 has no reload command and would treat "reload" as a project directory to open.
+if ! version_lt "${OC_VERSION%%-*}" "2.0.0"; then
+  opencode reload >/dev/null 2>&1 || true
+fi
 COUNT=$(opencode models 2>/dev/null | grep -cE "^litellm(/|-)" || true)
+# V2 on a fresh install: the plugin starts from its (empty) cache and reloads once
+# 1Password and the gateway answer, so the first listing can come back empty.
+if [ "$COUNT" -eq 0 ] && ! version_lt "${OC_VERSION%%-*}" "2.0.0"; then
+  sleep 8
+  COUNT=$(opencode models 2>/dev/null | grep -cE "^litellm(/|-)" || true)
+fi
 
 say ""
 if [ "$COUNT" -gt 0 ]; then

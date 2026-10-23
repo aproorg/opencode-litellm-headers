@@ -16,8 +16,8 @@ $LitellmBase = if ($env:OPENCODE_LITELLM_BASE_URL) { $env:OPENCODE_LITELLM_BASE_
 $LitellmRoot = $LitellmBase -replace '/v1$', ''
 $OpencodeLog = Join-Path $HOME ".local\share\opencode\log\opencode.log"
 $DefaultOpRef = "op://Employee/ai.apro.is litellm/API Key"
-# The config hook this plugin needs does not exist in older opencode.
-$MinOpencode = [version]"1.18.0"
+# 1.18.29 is the first V1 that loads the plugin's combined V1/V2 default export.
+$MinOpencode = [version]"1.18.29"
 $AproConfigDir = if ($env:APPDATA) { Join-Path $env:APPDATA "opencode-apro" } else { Join-Path $HOME ".config\opencode-apro" }
 $LocalEnv = Join-Path $AproConfigDir "local.env"
 $stamp = Get-Date -Format yyyyMMddHHmmss
@@ -76,7 +76,9 @@ function Get-ConfigProblem($path) {
 function Get-OpencodeVersion {
   $raw = & opencode --version 2>$null | Select-Object -First 1
   if (-not $raw) { return $null }
-  try { return [version](($raw -replace '[^0-9.].*$', '').Trim()) } catch { return $null }
+  # V1 prints "1.19.4", V2 prints "opencode v2.1.4": keep only the version number.
+  if ($raw -notmatch '(\d+(\.\d+)+)') { return $null }
+  try { return [version]$Matches[1] } catch { return $null }
 }
 
 # 1. opencode itself, new enough to have the plugin config hook
@@ -208,7 +210,7 @@ if ($managed) {
 }
 
 if (-not $config.Contains('$schema')) { $config['$schema'] = "https://opencode.ai/config.json" }
-$entry = "file:///" + ($PluginHome -replace '\\', '/').TrimStart('/') + "/index.js"
+$entry = "file:///" + ($PluginHome -replace '\\', '/').TrimStart('/')
 $plugins = @($config["plugin"]) | Where-Object { $_ -and ($_ -notlike "*opencode-litellm-headers*") -and ($_ -notlike "*apro-opencode*") }
 $config["plugin"] = @($plugins) + @($entry)
 
@@ -233,6 +235,11 @@ if (Test-Path $pluginCache) { Remove-Item -Recurse -Force $pluginCache }
 # 5. verify
 Write-Host ""
 Write-Host "Syncing models..."
+# V2 serves every session from a background server that keeps its old config until reloaded.
+# V1 has no reload command and would treat "reload" as a project directory to open.
+if ($ocVersion -ge [version]"2.0.0") {
+  try { & opencode reload *> $null } catch { }
+}
 # $ErrorActionPreference is Stop, and anything opencode writes to stderr would abort the
 # script with a raw node trace instead of the diagnosis below.
 $previous = $ErrorActionPreference
@@ -240,6 +247,15 @@ $ErrorActionPreference = "Continue"
 $output = @(& opencode models 2>&1 | ForEach-Object { $_.ToString() })
 $ErrorActionPreference = $previous
 $models = @($output | Where-Object { $_ -match "^litellm(/|-)" })
+# V2 on a fresh install: the plugin starts from its (empty) cache and reloads once
+# 1Password and the gateway answer, so the first listing can come back empty.
+if ($models.Count -eq 0 -and $ocVersion -ge [version]"2.0.0") {
+  Start-Sleep -Seconds 8
+  $ErrorActionPreference = "Continue"
+  $output = @(& opencode models 2>&1 | ForEach-Object { $_.ToString() })
+  $ErrorActionPreference = $previous
+  $models = @($output | Where-Object { $_ -match "^litellm(/|-)" })
+}
 
 Write-Host ""
 if ($models.Count -gt 0) {
