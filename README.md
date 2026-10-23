@@ -20,7 +20,7 @@ irm https://raw.githubusercontent.com/aproorg/opencode-litellm-headers/main/inst
 
 **Run the same command again to update.** The installer owns the plugin files, so rerunning replaces them with the current version — there is no package cache to invalidate.
 
-It installs OpenCode if missing — or upgrades it if it predates 1.18.0, which is where the plugin config hook this relies on arrived — downloads the plugin to `~/.local/share/apro-opencode/`, records the version in a `VERSION` file beside it, points `~/.config/opencode/opencode.json` at it, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models.
+It installs OpenCode if missing — or upgrades it if it predates 1.18.29, the first 1.x that loads this plugin's combined V1/V2 entrypoint — downloads the plugin to `~/.local/share/apro-opencode/`, records the version in a `VERSION` file beside it, points `~/.config/opencode/opencode.json` at it, offers to remove settings the plugin now manages (keeping a backup), and verifies by listing the models.
 
 It asks which 1Password item holds your LiteLLM key, since it is not in the same vault for everyone. Press enter to accept the default, or paste the reference straight from 1Password's **Copy Secret Reference** button. Your answer is stored in `~/.config/opencode-apro/local.env` (`%APPDATA%\opencode-apro\local.env` on Windows) and becomes the default next time, so updating never re-asks blind.
 
@@ -35,7 +35,7 @@ The config it writes is one entry:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["file:///Users/you/.local/share/apro-opencode/index.js"]
+  "plugin": ["file:///Users/you/.local/share/apro-opencode"]
 }
 ```
 
@@ -62,6 +62,25 @@ Anything you define yourself wins: the plugin only fills in keys that are absent
 | `OPENCODE_LITELLM_BASE_URL` | `https://litellm.ai.apro.is/v1` | Gateway to talk to |
 | `OPENCODE_LITELLM_PROVIDER_ID` | `litellm` | Provider key in your config |
 | `OPENCODE_LITELLM_HEADER_NAME` | `x-github-repo` | Outgoing header name |
+| `OPENCODE_LITELLM_EXTRA_PROVIDERS` | unset | OpenCode 2.x only: comma-separated provider ids to keep besides the gateway (2.x has no `enabled_providers` a plugin can read) |
+
+## OpenCode 1.x and 2.x
+
+One default export serves both plugin APIs: 1.x (1.18.29+) calls `server()` in `src/v1.js`, 2.x calls `setup()` in `src/v2.js`. They share the key, model and repo helpers.
+
+| | 1.x | 2.x |
+| --- | --- | --- |
+| Providers and models | `config` hook | `ctx.provider.transform` |
+| Default model | `model` / `small_model` | `ctx.model.transform` sets the default; 2.x has no `small_model` |
+| Gateway only | `enabled_providers`, `disabled_providers: ["opencode"]` | non-gateway providers removed, including OpenCode's free `opencode` models. Providers you configure explicitly stay |
+| Header | `chat.headers` | `model.request` session hook |
+| Repo | the opencode process's directory | the session's location — 2.x serves every project from one background server |
+
+2.x fails a session whose plugin setup runs past a few seconds, so on 2.x the plugin starts from the cached key and models and gives 1Password and the gateway 3.5s. A slower answer is applied with a provider reload once it lands. On a cold cache the very first model list can therefore come back empty for a few seconds.
+
+2.x only loads a local plugin from a directory, so the config entry points at `apro-opencode`, not `apro-opencode/index.js`. 1.x accepts both.
+
+On 2.x the installer runs `opencode reload` so the background server picks up the plugin. Run it yourself after editing the config by hand.
 
 ## MCP servers
 
@@ -95,7 +114,7 @@ One thing it does not touch: delete `~/bin/opencode` yourself if you still have 
 
 OpenCode's config file is static JSON: it can substitute `{env:VAR}` but cannot run a command, which is why the setup used to need a shell wrapper to export secrets first. A plugin is code, and OpenCode runs the `config` hook on the loaded config before it builds providers and MCP servers — so the plugin does that work in-process instead.
 
-The `x-github-repo` header goes through the `chat.headers` hook, which fires before every AI request. `provider.options.headers` with `{env:VAR}` resolves once at startup and freezes for the life of the process; the hook re-resolves per request, so the header follows you when you `cd` between repos. It filters on `input.provider.id`, so other providers are untouched, and falls back to the directory basename when there is no git remote.
+The `x-github-repo` header goes through the `chat.headers` hook (2.x: the `model.request` hook), which fires before every AI request. `provider.options.headers` with `{env:VAR}` resolves once at startup and freezes for the life of the process; the hook re-resolves per request, so the header follows you when you `cd` between repos. It filters on `input.provider.id`, so other providers are untouched, and falls back to the directory basename when there is no git remote.
 
 ## Development
 
@@ -104,14 +123,18 @@ git clone https://github.com/aproorg/opencode-litellm-headers.git
 cd opencode-litellm-headers
 ```
 
-Test against an isolated config without touching your own. Isolate with `HOME`, not `OPENCODE_CONFIG_DIR` — that one adds a config directory rather than replacing the real one, and other tooling sets it:
+Test against an isolated config without touching your own. Isolate with the `XDG_*` directories, not `OPENCODE_CONFIG_DIR` — that one adds a config directory rather than replacing the real one, and other tooling sets it. Do not fake `HOME` either: the 1Password CLI finds the desktop app through it, and every key read then fails.
 
 ```bash
-mkdir -p /tmp/octest/.config/opencode
-printf '{"$schema":"https://opencode.ai/config.json","plugin":["file://%s/src/index.js"]}\n' "$PWD" \
-  > /tmp/octest/.config/opencode/opencode.json
-HOME=/tmp/octest opencode models   # reads your real 1Password item
+T=/tmp/octest
+mkdir -p $T/config/opencode
+printf '{"$schema":"https://opencode.ai/config.json","plugin":["file://%s/src"]}\n' "$PWD" \
+  > $T/config/opencode/opencode.json
+OP_CONFIG_DIR=$HOME/.config/op XDG_CONFIG_HOME=$T/config XDG_DATA_HOME=$T/data XDG_STATE_HOME=$T/state XDG_CACHE_HOME=$T/cache \
+  opencode models --standalone   # reads your real 1Password item
 ```
+
+`OP_CONFIG_DIR` keeps `op` on its real config, which it would otherwise look for under the fake `XDG_CONFIG_HOME`. That directory also has no `opencode-apro/local.env`, so set `OPENCODE_LITELLM_OP_REF` if your key is not at the default reference. On 2.x, `--standalone` runs a private server instead of reusing the background one, which still has your real config. Drop it on 1.x.
 
 Plain JavaScript, no build step.
 
